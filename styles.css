@@ -55,6 +55,45 @@ textarea {
   padding: 0 0.12rem;
 }
 
+.essay-annotation {
+  background: #fef08a;
+  border-bottom: 2px solid #eab308;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  padding: 0.08rem 0.12rem;
+  transition: background 160ms ease;
+}
+
+.essay-annotation:hover {
+  background: #fde047;
+}
+
+.essay-annotation-solved {
+  background: #e2e8f0;
+  border-bottom-color: #94a3b8;
+}
+
+.revision-delete {
+  background: #fff1f2;
+  color: #dc2626;
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.revision-add {
+  background: #ecfdf5;
+  color: #15803d;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: #86efac;
+  text-decoration-thickness: 2px;
+}
+
+.note-focus {
+  border-color: #eab308 !important;
+  box-shadow: 0 0 0 4px rgba(234, 179, 8, 0.14);
+}
+
 .scrollbar-thin {
   scrollbar-color: #d0d5dd transparent;
   scrollbar-width: thin;
