@@ -171,6 +171,32 @@ function wordCount(html = "") {
   return english.length + chinese.length;
 }
 
+function replaceEditorText(editor, offset, length, replacement) {
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  let position = 0;
+  let node;
+
+  while ((node = walker.nextNode())) {
+    const start = position;
+    const end = start + node.nodeValue.length;
+    nodes.push({ node, start, end });
+    position = end;
+  }
+
+  const startEntry = nodes.find((entry) => offset >= entry.start && offset <= entry.end);
+  const endOffset = offset + length;
+  const endEntry = nodes.find((entry) => endOffset >= entry.start && endOffset <= entry.end);
+  if (!startEntry || !endEntry) return false;
+
+  const range = document.createRange();
+  range.setStart(startEntry.node, offset - startEntry.start);
+  range.setEnd(endEntry.node, endOffset - endEntry.start);
+  range.deleteContents();
+  range.insertNode(document.createTextNode(replacement));
+  return true;
+}
+
 function formatDate(value, includeTime = false) {
   if (!value) return "—";
   const date = new Date(value);
@@ -450,6 +476,7 @@ function EssayEditor({ essay, onSave, onClose }) {
   });
   const [saved, setSaved] = useState(false);
   const [editorWords, setEditorWords] = useState(() => wordCount(form.content));
+  const [grammarState, setGrammarState] = useState({ loading: false, matches: [], checked: false, error: "" });
   const latestForm = useRef(form);
 
   useEffect(() => {
@@ -488,6 +515,41 @@ function EssayEditor({ essay, onSave, onClose }) {
     onSave({ ...form, content });
   };
 
+  const checkGrammar = async () => {
+    const text = editorRef.current?.textContent || "";
+    if (!text.trim()) return alert("请先输入英文作文正文。");
+    if (text.length > 20000) return alert("免费语法检查单次最多检查约 20,000 个字符。");
+
+    setGrammarState({ loading: true, matches: [], checked: false, error: "" });
+    try {
+      const response = await fetch("https://api.languagetool.org/v2/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ text, language: "en-US", enabledOnly: "false" })
+      });
+      if (!response.ok) throw new Error(`LanguageTool returned ${response.status}`);
+      const result = await response.json();
+      setGrammarState({ loading: false, matches: result.matches || [], checked: true, error: "" });
+    } catch {
+      setGrammarState({
+        loading: false,
+        matches: [],
+        checked: true,
+        error: "暂时无法连接 LanguageTool。请稍后重试，或检查网络连接。"
+      });
+    }
+  };
+
+  const applyGrammarSuggestion = (match, replacement) => {
+    if (!editorRef.current || !replaceEditorText(editorRef.current, match.offset, match.length, replacement)) {
+      return alert("正文已发生变化，请重新检查语法后再应用建议。");
+    }
+    const content = editorRef.current.innerHTML;
+    latestForm.current = { ...latestForm.current, content };
+    setEditorWords(wordCount(content));
+    setGrammarState({ loading: false, matches: [], checked: false, error: "" });
+  };
+
   const inputClass = "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-sage-500";
   return (
     <Modal title={isNew ? "新建作文" : "编辑作文"} onClose={onClose} wide>
@@ -502,6 +564,9 @@ function EssayEditor({ essay, onSave, onClose }) {
                 {[["bold", "B"], ["italic", "I"], ["formatBlock", "H2", "h2"], ["formatBlock", "P", "p"], ["hiliteColor", "高亮", "#fff0b8"], ["insertUnorderedList", "列表"]].map(([cmd, label, value]) => (
                   <button key={`${cmd}-${label}`} type="button" onClick={() => command(cmd, value)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white">{label}</button>
                 ))}
+                <button type="button" onClick={checkGrammar} disabled={grammarState.loading} className="ml-auto rounded-lg bg-sage-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
+                  {grammarState.loading ? "检查中..." : "✓ 语法检查"}
+                </button>
               </div>
               <div
                 ref={editorRef}
@@ -516,6 +581,45 @@ function EssayEditor({ essay, onSave, onClose }) {
                 className="editor-content editor-placeholder min-h-[360px] px-5 py-4 text-[15px] leading-7 outline-none"
               />
             </div>
+            {(grammarState.checked || grammarState.loading) && (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold">LanguageTool 检查结果</h3>
+                    <p className="mt-1 text-xs text-slate-400">正文会发送到 LanguageTool 公共服务进行检查。</p>
+                  </div>
+                  {!grammarState.loading && <button type="button" onClick={() => setGrammarState({ loading: false, matches: [], checked: false, error: "" })} className="text-xs text-slate-400">关闭</button>}
+                </div>
+                {grammarState.error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-600">{grammarState.error}</p>}
+                {grammarState.checked && !grammarState.error && !grammarState.matches.length && <p className="mt-4 rounded-xl bg-sage-50 p-3 text-sm text-sage-700">没有发现明显的拼写或语法问题。</p>}
+                {!!grammarState.matches.length && (
+                  <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1 scrollbar-thin">
+                    {grammarState.matches.map((match, index) => {
+                      const sourceText = editorRef.current?.textContent || "";
+                      const original = sourceText.slice(match.offset, match.offset + match.length);
+                      return (
+                        <div key={`${match.offset}-${index}`} className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-md bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">{original || "问题位置"}</span>
+                            <span className="text-xs text-slate-400">{match.rule?.category?.name || "Grammar"}</span>
+                          </div>
+                          <p className="mt-2 text-sm leading-6 text-slate-700">{match.message}</p>
+                          {!!match.replacements?.length && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {match.replacements.slice(0, 5).map((item) => (
+                                <button key={item.value} type="button" onClick={() => applyGrammarSuggestion(match, item.value)} className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-sage-700 shadow-sm">
+                                  替换为 “{item.value}”
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <aside className="space-y-4">
