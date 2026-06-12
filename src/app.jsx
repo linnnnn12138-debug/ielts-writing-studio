@@ -197,6 +197,36 @@ function replaceEditorText(editor, offset, length, replacement) {
   return true;
 }
 
+function buildAnnotatedHtml(html, notes) {
+  const container = document.createElement("div");
+  container.innerHTML = html || "";
+
+  notes
+    .filter((note) => note.relatedText?.trim())
+    .forEach((note) => {
+      const target = note.relatedText.trim();
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+      let node;
+
+      while ((node = walker.nextNode())) {
+        const index = node.nodeValue.indexOf(target);
+        if (index === -1) continue;
+
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + target.length);
+        const mark = document.createElement("mark");
+        mark.className = note.isSolved ? "essay-annotation essay-annotation-solved" : "essay-annotation";
+        mark.dataset.noteId = note.id;
+        mark.title = `批注：${note.title}`;
+        range.surroundContents(mark);
+        break;
+      }
+    });
+
+  return container.innerHTML;
+}
+
 function formatDate(value, includeTime = false) {
   if (!value) return "—";
   const date = new Date(value);
@@ -678,15 +708,46 @@ function ScoreEditor({ essay, score, onSave, onClose }) {
   );
 }
 
-function NoteEditor({ essayId, onSave, onClose }) {
-  const [form, setForm] = useState({ noteType: "词汇问题", title: "", content: "", relatedText: "", isSolved: false });
+function NoteEditor({ essayId, initialRelatedText = "", onSave, onClose }) {
+  const [form, setForm] = useState({
+    noteType: "词汇问题",
+    title: "",
+    content: "",
+    relatedText: initialRelatedText,
+    deletedText: initialRelatedText,
+    addedText: "",
+    isSolved: false
+  });
   const inputClass = "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-sage-500";
   return (
-    <Modal title="添加笔记或批注" onClose={onClose}>
+    <Modal title="添加修订与批注" onClose={onClose}>
       <div className="space-y-4 p-6">
+        <div className="rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-800">
+          在作文详情页选中原文后创建批注，保存后对应句子会高亮。删除内容显示为红色删除线，新增内容显示为绿色。
+        </div>
         <div><label className="mb-2 block text-xs font-semibold text-slate-500">笔记类型</label><select value={form.noteType} onChange={(e) => setForm({ ...form, noteType: e.target.value })} className={inputClass}>{NOTE_TYPES.map((v) => <option key={v}>{v}</option>)}</select></div>
         <div><label className="mb-2 block text-xs font-semibold text-slate-500">标题</label><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className={inputClass} placeholder="一句话概括问题" /></div>
-        <div><label className="mb-2 block text-xs font-semibold text-slate-500">对应原文</label><textarea value={form.relatedText} onChange={(e) => setForm({ ...form, relatedText: e.target.value })} className={`${inputClass} min-h-20`} placeholder="粘贴对应的句子或段落（可选）" /></div>
+        <div><label className="mb-2 block text-xs font-semibold text-slate-500">对应原文（用于正文高亮）</label><textarea value={form.relatedText} onChange={(e) => setForm({ ...form, relatedText: e.target.value })} className={`${inputClass} min-h-20`} placeholder="先在作文正文中选中句子，或在这里粘贴原文" /></div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-2 block text-xs font-semibold text-rose-600">删除内容</label>
+            <textarea value={form.deletedText} onChange={(e) => setForm({ ...form, deletedText: e.target.value })} className={`${inputClass} min-h-24 border-rose-200 bg-rose-50/50`} placeholder="需要删除或替换的原文" />
+          </div>
+          <div>
+            <label className="mb-2 block text-xs font-semibold text-emerald-600">新增内容</label>
+            <textarea value={form.addedText} onChange={(e) => setForm({ ...form, addedText: e.target.value })} className={`${inputClass} min-h-24 border-emerald-200 bg-emerald-50/50`} placeholder="修改后的表达" />
+          </div>
+        </div>
+        {(form.deletedText || form.addedText) && (
+          <div className="rounded-2xl border border-slate-200 p-4">
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-400">修订预览</div>
+            <div className="mt-3 text-sm leading-7">
+              {form.deletedText && <span className="revision-delete">{form.deletedText}</span>}
+              {form.deletedText && form.addedText && <span className="mx-2 text-slate-300">→</span>}
+              {form.addedText && <span className="revision-add">{form.addedText}</span>}
+            </div>
+          </div>
+        )}
         <div><label className="mb-2 block text-xs font-semibold text-slate-500">笔记内容</label><textarea value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} className={`${inputClass} min-h-28`} placeholder="记录问题、修改方式或反馈..." /></div>
       </div>
       <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4"><button onClick={onClose} className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-500">取消</button><button onClick={() => form.title.trim() ? onSave({ ...form, essayId }) : alert("请填写笔记标题。")} className="rounded-xl bg-ink px-5 py-2 text-sm font-semibold text-white">保存笔记</button></div>
@@ -698,6 +759,27 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
   const score = [...data.scores].reverse().find((item) => item.essayId === essay.id);
   const notes = data.notes.filter((item) => item.essayId === essay.id);
   const revisions = data.revisions.filter((item) => item.essayId === essay.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const articleRef = useRef(null);
+  const [selectedText, setSelectedText] = useState("");
+  const annotatedHtml = useMemo(() => buildAnnotatedHtml(essay.content || "<p>暂无正文</p>", notes), [essay.content, notes]);
+
+  const addNoteFromSelection = () => {
+    if (selectedText) {
+      onNote(selectedText);
+      window.getSelection()?.removeAllRanges();
+      setSelectedText("");
+      return;
+    }
+    onNote("");
+  };
+
+  const focusNote = (noteId) => {
+    const note = document.getElementById(`note-${noteId}`);
+    note?.scrollIntoView({ behavior: "smooth", block: "center" });
+    note?.classList.add("note-focus");
+    setTimeout(() => note?.classList.remove("note-focus"), 1600);
+  };
+
   return (
     <>
       <button onClick={onBack} className="mb-6 text-sm font-semibold text-slate-500 hover:text-ink">← 返回作文库</button>
@@ -708,7 +790,9 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
           <p className="mt-2 text-sm text-slate-400">写于 {formatDate(essay.writingDate)} · {wordCount(essay.content)} words · 修改 {essay.revisionCount || 0} 次</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={onNote} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold">＋ 笔记</button>
+          <button onClick={addNoteFromSelection} className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${selectedText ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white"}`}>
+            ＋ {selectedText ? `批注已选文字（${selectedText.length}）` : "批注选中文本"}
+          </button>
           <button onClick={onScore} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold">◎ 评分</button>
           <button onClick={onEdit} className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-white">编辑作文</button>
         </div>
@@ -719,8 +803,27 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
             <div className="text-xs font-bold uppercase tracking-wider text-sage-600">IELTS Question</div>
             <p className="mt-3 text-base font-medium leading-7">{essay.question || "未填写题目原文"}</p>
           </section>
-          <article className="rounded-3xl border border-slate-100 bg-white p-7 shadow-soft">
-            <div className="editor-content text-[15px] leading-8 text-slate-700" dangerouslySetInnerHTML={{ __html: essay.content || "<p>暂无正文</p>" }} />
+          <article
+            ref={articleRef}
+            onMouseUp={() => {
+              const selection = window.getSelection();
+              const anchor = selection?.anchorNode;
+              setSelectedText(anchor && articleRef.current?.contains(anchor) ? selection.toString().trim() : "");
+            }}
+            className="rounded-3xl border border-slate-100 bg-white p-7 shadow-soft"
+          >
+            <div className="mb-5 flex items-center justify-between rounded-2xl bg-sage-50 px-4 py-3 text-xs text-sage-700">
+              <span>选中正文中的句子或段落，然后点击“批注选中文本”。</span>
+              <span>{notes.filter((note) => note.relatedText).length} 处高亮</span>
+            </div>
+            <div
+              className="editor-content text-[15px] leading-8 text-slate-700"
+              onClick={(event) => {
+                const mark = event.target.closest("[data-note-id]");
+                if (mark) focusNote(mark.dataset.noteId);
+              }}
+              dangerouslySetInnerHTML={{ __html: annotatedHtml }}
+            />
           </article>
           <section className="rounded-3xl border border-slate-100 bg-white p-6 shadow-soft">
             <div className="mb-5 flex items-center justify-between"><h2 className="font-bold">修改历史</h2><span className="text-xs text-slate-400">{revisions.length} 个版本</span></div>
@@ -742,11 +845,18 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
             </> : <button onClick={onScore} className="w-full rounded-xl border border-dashed border-slate-200 py-4 text-sm font-semibold text-slate-500">添加第一次评分</button>}
           </section>
           <section className="rounded-3xl border border-slate-100 bg-white p-6 shadow-soft">
-            <div className="mb-5 flex items-center justify-between"><h2 className="font-bold">笔记与批注</h2><button onClick={onNote} className="text-sm font-semibold text-sage-600">＋ 添加</button></div>
+            <div className="mb-5 flex items-center justify-between"><h2 className="font-bold">修订与批注</h2><button onClick={() => onNote("")} className="text-sm font-semibold text-sage-600">＋ 添加</button></div>
             {notes.length ? <div className="space-y-3">{notes.map((note) => (
-              <div key={note.id} className={`rounded-2xl border p-4 ${note.isSolved ? "border-slate-100 bg-slate-50 opacity-70" : "border-amber-100 bg-amber-50/50"}`}>
+              <div id={`note-${note.id}`} key={note.id} className={`rounded-2xl border p-4 transition ${note.isSolved ? "border-slate-100 bg-slate-50 opacity-70" : "border-amber-100 bg-amber-50/50"}`}>
                 <div className="flex items-start justify-between gap-2"><div><div className="text-[11px] font-bold text-sage-600">{note.noteType}</div><div className="mt-1 text-sm font-semibold">{note.title}</div></div><button onClick={() => toggleNote(note.id)} className="text-xs text-slate-400">{note.isSolved ? "已解决" : "标记解决"}</button></div>
                 {note.relatedText && <blockquote className="mt-3 border-l-2 border-sage-300 pl-3 text-xs italic leading-5 text-slate-500">{note.relatedText}</blockquote>}
+                {(note.deletedText || note.addedText) && (
+                  <div className="mt-3 rounded-xl bg-white p-3 text-sm leading-6">
+                    {note.deletedText && <span className="revision-delete">{note.deletedText}</span>}
+                    {note.deletedText && note.addedText && <span className="mx-2 text-slate-300">→</span>}
+                    {note.addedText && <span className="revision-add">{note.addedText}</span>}
+                  </div>
+                )}
                 <p className="mt-3 text-sm leading-6 text-slate-600">{note.content}</p>
               </div>
             ))}</div> : <p className="text-sm text-slate-400">还没有笔记。读完作文后，记录一个最值得改进的地方。</p>}
@@ -790,6 +900,13 @@ function NotesPage({ data, toggleNote, openEssay }) {
           return <div key={note.id} className={`rounded-3xl border bg-white p-6 shadow-soft ${note.isSolved ? "border-slate-100 opacity-70" : "border-amber-100"}`}>
             <div className="flex justify-between gap-4"><div><span className="rounded-full bg-sage-50 px-2.5 py-1 text-xs font-bold text-sage-700">{note.noteType}</span><h2 className="mt-4 font-bold">{note.title}</h2></div><button onClick={() => toggleNote(note.id)} className="text-xs font-semibold text-slate-400">{note.isSolved ? "重新打开" : "标记解决"}</button></div>
             {note.relatedText && <blockquote className="mt-4 border-l-2 border-sage-300 pl-4 text-sm italic leading-6 text-slate-500">{note.relatedText}</blockquote>}
+            {(note.deletedText || note.addedText) && (
+              <div className="mt-4 rounded-2xl bg-mist p-4 text-sm leading-7">
+                {note.deletedText && <span className="revision-delete">{note.deletedText}</span>}
+                {note.deletedText && note.addedText && <span className="mx-2 text-slate-300">→</span>}
+                {note.addedText && <span className="revision-add">{note.addedText}</span>}
+              </div>
+            )}
             <p className="mt-4 text-sm leading-6 text-slate-600">{note.content}</p>
             <button onClick={() => essay && openEssay(essay.id)} className="mt-5 text-xs font-semibold text-sage-600">{essay?.title || "作文已删除"} →</button>
           </div>;
@@ -854,6 +971,7 @@ function App() {
   const [showEditor, setShowEditor] = useState(false);
   const [showScore, setShowScore] = useState(false);
   const [showNote, setShowNote] = useState(false);
+  const [noteRelatedText, setNoteRelatedText] = useState("");
   const selectedEssay = data.essays.find((essay) => essay.id === selectedEssayId);
 
   useEffect(() => {
@@ -915,6 +1033,12 @@ function App() {
     const now = new Date().toISOString();
     setData({ ...data, notes: [...data.notes, { ...form, id: uid("note"), createdAt: now, updatedAt: now }] });
     setShowNote(false);
+    setNoteRelatedText("");
+  };
+
+  const openNoteEditor = (relatedText = "") => {
+    setNoteRelatedText(relatedText);
+    setShowNote(true);
   };
 
   const toggleNote = (id) => setData({ ...data, notes: data.notes.map((note) => note.id === id ? { ...note, isSolved: !note.isSolved, updatedAt: new Date().toISOString() } : note) });
@@ -965,7 +1089,7 @@ function App() {
   else if (page === "scores") content = <ScoresPage data={data} openEssay={openEssay} />;
   else if (page === "revisions") content = <RevisionsPage data={data} openEssay={openEssay} />;
   else if (page === "settings") content = <SettingsPage exportData={exportData} importData={importData} resetData={() => { if (confirm("确定重置全部数据吗？")) { localStorage.removeItem(STORAGE_KEY); setData(seedData); } }} />;
-  else if (page === "essay-detail" && selectedEssay) content = <EssayDetail essay={selectedEssay} data={data} onBack={() => setPage("essays")} onEdit={() => editEssay(selectedEssay.id)} onScore={() => setShowScore(true)} onNote={() => setShowNote(true)} toggleNote={toggleNote} restoreRevision={restoreRevision} />;
+  else if (page === "essay-detail" && selectedEssay) content = <EssayDetail essay={selectedEssay} data={data} onBack={() => setPage("essays")} onEdit={() => editEssay(selectedEssay.id)} onScore={() => setShowScore(true)} onNote={openNoteEditor} toggleNote={toggleNote} restoreRevision={restoreRevision} />;
   else content = <Dashboard data={data} openEssay={openEssay} onNewEssay={startNew} setPage={setPage} />;
 
   return (
@@ -975,7 +1099,7 @@ function App() {
       <main className="px-4 py-8 lg:ml-64 lg:px-10 xl:px-14 xl:py-10"><div className="mx-auto max-w-7xl">{content}</div></main>
       {showEditor && <EssayEditor essay={editorEssayId ? data.essays.find((e) => e.id === editorEssayId) : null} onSave={saveEssay} onClose={() => setShowEditor(false)} />}
       {showScore && selectedEssay && <ScoreEditor essay={selectedEssay} score={[...data.scores].reverse().find((s) => s.essayId === selectedEssay.id)} onSave={saveScore} onClose={() => setShowScore(false)} />}
-      {showNote && selectedEssay && <NoteEditor essayId={selectedEssay.id} onSave={saveNote} onClose={() => setShowNote(false)} />}
+      {showNote && selectedEssay && <NoteEditor essayId={selectedEssay.id} initialRelatedText={noteRelatedText} onSave={saveNote} onClose={() => { setShowNote(false); setNoteRelatedText(""); }} />}
     </div>
   );
 }
