@@ -217,6 +217,53 @@ function replaceTextInHtml(html, target, replacement) {
   return { html, replaced: false };
 }
 
+function extractDirectRevisionNotes(html, essayId, createdAt) {
+  const container = document.createElement("div");
+  container.innerHTML = html || "";
+  const notes = [];
+  let group = null;
+
+  const flush = () => {
+    if (!group || (!group.deletedText && !group.addedText)) return;
+    const relatedText = group.deletedText || group.addedText;
+    notes.push({
+      id: uid("note"),
+      essayId,
+      noteType: "老师反馈",
+      title: "正文直接修订",
+      content: "由修订模式自动同步。",
+      relatedText,
+      deletedText: group.deletedText,
+      addedText: group.addedText,
+      revisionStatus: "",
+      isSolved: false,
+      createdAt,
+      updatedAt: createdAt
+    });
+    group = null;
+  };
+
+  const walk = (node) => {
+    Array.from(node.childNodes).forEach((child) => {
+      if (child.nodeType === Node.ELEMENT_NODE && child.classList.contains("direct-revision")) {
+        if (!group) group = { deletedText: "", addedText: "" };
+        if (child.classList.contains("revision-delete")) group.deletedText += child.textContent || "";
+        if (child.classList.contains("revision-add")) group.addedText += child.textContent || "";
+        return;
+      }
+      if (child.nodeType === Node.TEXT_NODE && child.nodeValue.trim()) {
+        flush();
+        return;
+      }
+      if (child.nodeType === Node.ELEMENT_NODE) walk(child);
+    });
+  };
+
+  walk(container);
+  flush();
+  return notes;
+}
+
 function parseVocabulary(text = "") {
   return text
     .split(/\r?\n/)
@@ -1101,6 +1148,7 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
   const revisions = data.revisions.filter((item) => item.essayId === essay.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const pendingNotes = notes.filter((note) => note.revisionStatus !== "accepted" && note.revisionStatus !== "rejected");
   const vocabulary = parseVocabulary(essay.keyVocabulary || "");
+  const originalHtml = essay.originalContent || essay.content || "<p>暂无正文</p>";
   const articleRef = useRef(null);
   const [selectedText, setSelectedText] = useState("");
   const annotatedHtml = useMemo(() => buildAnnotatedHtml(essay.content || "<p>暂无正文</p>", notes), [essay.content, notes]);
@@ -1145,6 +1193,16 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
             <div className="text-xs font-bold uppercase tracking-wider text-sage-600">IELTS Question</div>
             <p className="mt-3 text-base font-medium leading-7">{essay.question || "未填写题目原文"}</p>
           </section>
+          <section className="rounded-3xl border border-slate-100 bg-white p-7 shadow-soft">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-800">原本作文</h2>
+                <p className="mt-1 text-xs text-slate-400">保留第一次写作内容，不受后续修订影响。</p>
+              </div>
+              <span className="text-xs text-slate-400">{wordCount(originalHtml)} words</span>
+            </div>
+            <div className="editor-content rounded-3xl bg-slate-50 p-7 text-[15px] leading-8 text-slate-700" dangerouslySetInnerHTML={{ __html: originalHtml }} />
+          </section>
           <article
             ref={articleRef}
             onMouseUp={() => {
@@ -1152,12 +1210,16 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
               const anchor = selection?.anchorNode;
               setSelectedText(anchor && articleRef.current?.contains(anchor) ? selection.toString().trim() : "");
             }}
-            className="rounded-3xl border border-slate-100 bg-white p-7 shadow-soft"
+            className="rounded-3xl border border-sage-100 bg-white p-7 shadow-soft"
           >
-            <div className="mb-5 flex items-center justify-between rounded-2xl bg-sage-50 px-4 py-3 text-xs text-sage-700">
-              <span>选中正文中的句子或段落，然后点击“批注选中文本”。</span>
-              <span>{pendingNotes.filter((note) => note.relatedText).length} 处待处理修订</span>
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-sage-700">修订作文</h2>
+                <p className="mt-1 text-xs text-slate-400">显示当前正文、直接修订和对应批注。</p>
+              </div>
+              <span className="rounded-full bg-sage-50 px-3 py-1 text-xs font-semibold text-sage-700">{pendingNotes.filter((note) => note.relatedText).length} 处待处理修订</span>
             </div>
+            <div className="mb-5 rounded-2xl bg-sage-50 px-4 py-3 text-xs text-sage-700">选中修订作文中的句子或段落，然后点击“批注选中文本”。</div>
             <div
               className="editor-content text-[15px] leading-8 text-slate-700"
               onClick={(event) => {
@@ -1381,20 +1443,24 @@ function App() {
     if (editorEssayId) {
       const old = data.essays.find((e) => e.id === editorEssayId);
       const changed = old.content !== form.content || old.title !== form.title || old.question !== form.question;
+      const syncedNotes = extractDirectRevisionNotes(form.content, old.id, now);
       const revision = changed ? {
         id: uid("revision"), essayId: old.id, oldContent: old.content, newContent: form.content,
         revisionNote: "编辑并保存作文", scoreBefore: old.currentScore || 0, scoreAfter: old.currentScore || 0, createdAt: now
       } : null;
       setData({
         ...data,
-        essays: data.essays.map((e) => e.id === editorEssayId ? { ...e, ...form, updatedAt: now, revisionCount: (e.revisionCount || 0) + (changed ? 1 : 0) } : e),
+        essays: data.essays.map((e) => e.id === editorEssayId ? { ...e, ...form, originalContent: e.originalContent || old.content, updatedAt: now, revisionCount: (e.revisionCount || 0) + (changed ? 1 : 0) } : e),
+        notes: syncedNotes.length ? [...data.notes, ...syncedNotes] : data.notes,
         revisions: revision ? [...data.revisions, revision] : data.revisions
       });
       setSelectedEssayId(editorEssayId);
       setPage("essay-detail");
     } else {
-      const essay = { ...form, id: uid("essay"), currentScore: 0, createdAt: now, updatedAt: now, revisionCount: 0 };
-      setData({ ...data, essays: [essay, ...data.essays] });
+      const essayId = uid("essay");
+      const syncedNotes = extractDirectRevisionNotes(form.content, essayId, now);
+      const essay = { ...form, id: essayId, originalContent: form.content, currentScore: 0, createdAt: now, updatedAt: now, revisionCount: 0 };
+      setData({ ...data, essays: [essay, ...data.essays], notes: syncedNotes.length ? [...data.notes, ...syncedNotes] : data.notes });
       setSelectedEssayId(essay.id);
       setPage("essay-detail");
     }
