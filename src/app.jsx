@@ -235,6 +235,7 @@ function extractDirectRevisionNotes(html, essayId, createdAt) {
       relatedText,
       deletedText: group.deletedText,
       addedText: group.addedText,
+      source: "direct",
       revisionStatus: "",
       isSolved: false,
       createdAt,
@@ -262,6 +263,10 @@ function extractDirectRevisionNotes(html, essayId, createdAt) {
   walk(container);
   flush();
   return notes;
+}
+
+function isAutoDirectRevisionNote(note) {
+  return note?.source === "direct" || note?.title === "正文直接修订" || note?.content === "由修订模式自动同步。";
 }
 
 function parseVocabulary(text = "") {
@@ -330,7 +335,7 @@ function buildAnnotatedHtml(html, notes) {
   container.innerHTML = html || "";
 
   notes
-    .filter((note) => note.relatedText?.trim() && note.revisionStatus !== "accepted")
+    .filter((note) => note.relatedText?.trim() && note.revisionStatus !== "accepted" && !isAutoDirectRevisionNote(note))
     .forEach((note) => {
       const target = note.relatedText.trim();
       const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
@@ -1146,7 +1151,7 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
   const score = [...data.scores].reverse().find((item) => item.essayId === essay.id);
   const notes = data.notes.filter((item) => item.essayId === essay.id);
   const revisions = data.revisions.filter((item) => item.essayId === essay.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  const pendingNotes = notes.filter((note) => note.revisionStatus !== "accepted" && note.revisionStatus !== "rejected");
+  const pendingNotes = notes.filter((note) => !isAutoDirectRevisionNote(note) && note.revisionStatus !== "accepted" && note.revisionStatus !== "rejected");
   const vocabulary = parseVocabulary(essay.keyVocabulary || "");
   const originalHtml = essay.originalContent || essay.content || "<p>暂无正文</p>";
   const articleRef = useRef(null);
@@ -1293,6 +1298,7 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
                       <div className="text-[11px] font-bold text-sage-600">{note.noteType}</div>
                       {note.revisionStatus === "accepted" && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">已接受</span>}
                       {note.revisionStatus === "rejected" && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">已拒绝</span>}
+                      {isAutoDirectRevisionNote(note) && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">已同步</span>}
                       {!note.revisionStatus && (note.deletedText || note.addedText) && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">待审批</span>}
                     </div>
                     <div className="mt-1 text-sm font-semibold">{note.title}</div>
@@ -1308,7 +1314,7 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
                   </div>
                 )}
                 <p className="mt-3 text-sm leading-6 text-slate-600">{note.content}</p>
-                {(note.deletedText || note.addedText) && note.revisionStatus !== "accepted" && note.revisionStatus !== "rejected" && (
+                {(note.deletedText || note.addedText) && !isAutoDirectRevisionNote(note) && note.revisionStatus !== "accepted" && note.revisionStatus !== "rejected" && (
                   <div className="mt-4 flex gap-2">
                     <button onClick={() => acceptRevisionNote(note.id)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">接受修订</button>
                     <button onClick={() => rejectRevisionNote(note.id)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-600">拒绝</button>
@@ -1451,7 +1457,10 @@ function App() {
       setData({
         ...data,
         essays: data.essays.map((e) => e.id === editorEssayId ? { ...e, ...form, originalContent: e.originalContent || old.content, updatedAt: now, revisionCount: (e.revisionCount || 0) + (changed ? 1 : 0) } : e),
-        notes: syncedNotes.length ? [...data.notes, ...syncedNotes] : data.notes,
+        notes: [
+          ...data.notes.filter((note) => note.essayId !== old.id || !isAutoDirectRevisionNote(note)),
+          ...syncedNotes
+        ],
         revisions: revision ? [...data.revisions, revision] : data.revisions
       });
       setSelectedEssayId(editorEssayId);
