@@ -197,12 +197,46 @@ function replaceEditorText(editor, offset, length, replacement) {
   return true;
 }
 
+function replaceTextInHtml(html, target, replacement) {
+  const needle = target?.trim();
+  if (!needle) return { html, replaced: false };
+
+  const container = document.createElement("div");
+  container.innerHTML = html || "";
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let node;
+
+  while ((node = walker.nextNode())) {
+    const index = node.nodeValue.indexOf(needle);
+    if (index === -1) continue;
+
+    node.nodeValue = `${node.nodeValue.slice(0, index)}${replacement || ""}${node.nodeValue.slice(index + needle.length)}`;
+    return { html: container.innerHTML, replaced: true };
+  }
+
+  return { html, replaced: false };
+}
+
+function parseVocabulary(text = "") {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [term, ...rest] = line.split(/\s*(?:\||-|：|:)\s*/);
+      return {
+        term: term?.trim() || line,
+        meaning: rest.join(" - ").trim()
+      };
+    });
+}
+
 function buildAnnotatedHtml(html, notes) {
   const container = document.createElement("div");
   container.innerHTML = html || "";
 
   notes
-    .filter((note) => note.relatedText?.trim())
+    .filter((note) => note.relatedText?.trim() && note.revisionStatus !== "accepted")
     .forEach((note) => {
       const target = note.relatedText.trim();
       const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
@@ -216,10 +250,28 @@ function buildAnnotatedHtml(html, notes) {
         range.setStart(node, index);
         range.setEnd(node, index + target.length);
         const mark = document.createElement("mark");
-        mark.className = note.isSolved ? "essay-annotation essay-annotation-solved" : "essay-annotation";
+        mark.className = note.revisionStatus === "rejected" || note.isSolved ? "essay-annotation essay-annotation-solved" : "essay-annotation";
         mark.dataset.noteId = note.id;
         mark.title = `批注：${note.title}`;
         range.surroundContents(mark);
+        if (note.revisionStatus !== "rejected" && (note.deletedText || note.addedText)) {
+          mark.innerHTML = "";
+          if (note.deletedText) {
+            const del = document.createElement("span");
+            del.className = "revision-delete inline";
+            del.textContent = note.deletedText;
+            mark.appendChild(del);
+          }
+          if (note.deletedText && note.addedText) {
+            mark.appendChild(document.createTextNode(" "));
+          }
+          if (note.addedText) {
+            const add = document.createElement("span");
+            add.className = "revision-add inline";
+            add.textContent = note.addedText;
+            mark.appendChild(add);
+          }
+        }
         break;
       }
     });
@@ -500,9 +552,11 @@ function EssaysPage({ data, openEssay, editEssay, onNewEssay, deleteEssay }) {
 function EssayEditor({ essay, onSave, onClose }) {
   const isNew = !essay;
   const editorRef = useRef(null);
-  const [form, setForm] = useState(essay || {
+  const [form, setForm] = useState({
     title: "", question: "", content: "", topic: "Education", essayType: "Opinion Essay",
-    status: "草稿", targetScore: 7, writingDate: new Date().toISOString().slice(0, 10)
+    status: "草稿", targetScore: 7, writingDate: new Date().toISOString().slice(0, 10),
+    modelEssay: "", keyVocabulary: "",
+    ...(essay || {})
   });
   const [saved, setSaved] = useState(false);
   const [editorWords, setEditorWords] = useState(() => wordCount(form.content));
@@ -651,6 +705,27 @@ function EssayEditor({ essay, onSave, onClose }) {
               </div>
             )}
           </div>
+          <div className="grid gap-5 xl:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-xs font-semibold text-emerald-600">高分范文</label>
+              <textarea
+                value={form.modelEssay || ""}
+                onChange={(e) => setForm({ ...form, modelEssay: e.target.value })}
+                className={`${inputClass} min-h-56 bg-emerald-50/30 leading-7`}
+                placeholder="在这里写入或粘贴高分范文，方便和自己的作文对照复习。"
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-xs font-semibold text-orange-600">重点词汇</label>
+              <textarea
+                value={form.keyVocabulary || ""}
+                onChange={(e) => setForm({ ...form, keyVocabulary: e.target.value })}
+                className={`${inputClass} min-h-56 bg-orange-50/40 leading-7`}
+                placeholder={"每行一个：\ndriverless cars | 无人驾驶汽车\nautonomous vehicles | 自动驾驶车辆\nroad safety | 道路安全"}
+              />
+              <p className="mt-2 text-xs leading-5 text-slate-400">支持 “英文 | 中文”、“英文 - 中文” 或 “英文：中文”。</p>
+            </div>
+          </div>
         </div>
         <aside className="space-y-4">
           <div><label className="mb-2 block text-xs font-semibold text-slate-500">主题</label><select value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} className={inputClass}>{TOPICS.map(([v, cn]) => <option key={v} value={v}>{v} · {cn}</option>)}</select></div>
@@ -755,10 +830,12 @@ function NoteEditor({ essayId, initialRelatedText = "", onSave, onClose }) {
   );
 }
 
-function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote, restoreRevision }) {
+function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote, acceptRevisionNote, rejectRevisionNote, restoreRevision }) {
   const score = [...data.scores].reverse().find((item) => item.essayId === essay.id);
   const notes = data.notes.filter((item) => item.essayId === essay.id);
   const revisions = data.revisions.filter((item) => item.essayId === essay.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const pendingNotes = notes.filter((note) => note.revisionStatus !== "accepted" && note.revisionStatus !== "rejected");
+  const vocabulary = parseVocabulary(essay.keyVocabulary || "");
   const articleRef = useRef(null);
   const [selectedText, setSelectedText] = useState("");
   const annotatedHtml = useMemo(() => buildAnnotatedHtml(essay.content || "<p>暂无正文</p>", notes), [essay.content, notes]);
@@ -814,7 +891,7 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
           >
             <div className="mb-5 flex items-center justify-between rounded-2xl bg-sage-50 px-4 py-3 text-xs text-sage-700">
               <span>选中正文中的句子或段落，然后点击“批注选中文本”。</span>
-              <span>{notes.filter((note) => note.relatedText).length} 处高亮</span>
+              <span>{pendingNotes.filter((note) => note.relatedText).length} 处待处理修订</span>
             </div>
             <div
               className="editor-content text-[15px] leading-8 text-slate-700"
@@ -825,6 +902,41 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
               dangerouslySetInnerHTML={{ __html: annotatedHtml }}
             />
           </article>
+          <section className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-soft">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-emerald-600">高分范文</h2>
+                <p className="mt-1 text-xs text-slate-400">用于和自己的作文结构、词汇和论证展开做对照。</p>
+              </div>
+              <button onClick={onEdit} className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">编辑范文</button>
+            </div>
+            {essay.modelEssay?.trim() ? (
+              <div className="model-essay whitespace-pre-wrap rounded-3xl bg-slate-50 p-7 text-[17px] leading-9 text-slate-800">{essay.modelEssay}</div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-emerald-200 bg-emerald-50/40 p-5 text-sm text-emerald-700">还没有高分范文。点击“编辑范文”写入或粘贴一篇范文。</div>
+            )}
+          </section>
+          <section className="rounded-3xl border border-orange-100 bg-white p-6 shadow-soft">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-orange-600">重点词汇</h2>
+                <p className="mt-1 text-xs text-slate-400">按主题积累可以直接复用的表达。</p>
+              </div>
+              <button onClick={onEdit} className="rounded-xl bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700">编辑词汇</button>
+            </div>
+            {vocabulary.length ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {vocabulary.map((item, index) => (
+                  <div key={`${item.term}-${index}`} className="rounded-2xl border border-orange-100 bg-orange-50/40 p-5">
+                    <div className="text-lg font-bold text-slate-900">{item.term}</div>
+                    {item.meaning && <div className="mt-3 text-base text-slate-500">{item.meaning}</div>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-orange-200 bg-orange-50/40 p-5 text-sm text-orange-700">还没有重点词汇。点击“编辑词汇”按行添加。</div>
+            )}
+          </section>
           <section className="rounded-3xl border border-slate-100 bg-white p-6 shadow-soft">
             <div className="mb-5 flex items-center justify-between"><h2 className="font-bold">修改历史</h2><span className="text-xs text-slate-400">{revisions.length} 个版本</span></div>
             {revisions.length ? <div className="space-y-3">{revisions.map((revision) => (
@@ -847,8 +959,19 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
           <section className="rounded-3xl border border-slate-100 bg-white p-6 shadow-soft">
             <div className="mb-5 flex items-center justify-between"><h2 className="font-bold">修订与批注</h2><button onClick={() => onNote("")} className="text-sm font-semibold text-sage-600">＋ 添加</button></div>
             {notes.length ? <div className="space-y-3">{notes.map((note) => (
-              <div id={`note-${note.id}`} key={note.id} className={`rounded-2xl border p-4 transition ${note.isSolved ? "border-slate-100 bg-slate-50 opacity-70" : "border-amber-100 bg-amber-50/50"}`}>
-                <div className="flex items-start justify-between gap-2"><div><div className="text-[11px] font-bold text-sage-600">{note.noteType}</div><div className="mt-1 text-sm font-semibold">{note.title}</div></div><button onClick={() => toggleNote(note.id)} className="text-xs text-slate-400">{note.isSolved ? "已解决" : "标记解决"}</button></div>
+              <div id={`note-${note.id}`} key={note.id} className={`rounded-2xl border p-4 transition ${note.isSolved ? "border-slate-100 bg-slate-50 opacity-80" : "border-amber-100 bg-amber-50/50"}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-[11px] font-bold text-sage-600">{note.noteType}</div>
+                      {note.revisionStatus === "accepted" && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">已接受</span>}
+                      {note.revisionStatus === "rejected" && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">已拒绝</span>}
+                      {!note.revisionStatus && (note.deletedText || note.addedText) && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">待审批</span>}
+                    </div>
+                    <div className="mt-1 text-sm font-semibold">{note.title}</div>
+                  </div>
+                  <button onClick={() => toggleNote(note.id)} className="text-xs text-slate-400">{note.isSolved ? "已解决" : "标记解决"}</button>
+                </div>
                 {note.relatedText && <blockquote className="mt-3 border-l-2 border-sage-300 pl-3 text-xs italic leading-5 text-slate-500">{note.relatedText}</blockquote>}
                 {(note.deletedText || note.addedText) && (
                   <div className="mt-3 rounded-xl bg-white p-3 text-sm leading-6">
@@ -858,6 +981,12 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
                   </div>
                 )}
                 <p className="mt-3 text-sm leading-6 text-slate-600">{note.content}</p>
+                {(note.deletedText || note.addedText) && note.revisionStatus !== "accepted" && note.revisionStatus !== "rejected" && (
+                  <div className="mt-4 flex gap-2">
+                    <button onClick={() => acceptRevisionNote(note.id)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">接受修订</button>
+                    <button onClick={() => rejectRevisionNote(note.id)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-600">拒绝</button>
+                  </div>
+                )}
               </div>
             ))}</div> : <p className="text-sm text-slate-400">还没有笔记。读完作文后，记录一个最值得改进的地方。</p>}
           </section>
@@ -1031,7 +1160,7 @@ function App() {
 
   const saveNote = (form) => {
     const now = new Date().toISOString();
-    setData({ ...data, notes: [...data.notes, { ...form, id: uid("note"), createdAt: now, updatedAt: now }] });
+    setData({ ...data, notes: [...data.notes, { ...form, revisionStatus: "", id: uid("note"), createdAt: now, updatedAt: now }] });
     setShowNote(false);
     setNoteRelatedText("");
   };
@@ -1042,6 +1171,43 @@ function App() {
   };
 
   const toggleNote = (id) => setData({ ...data, notes: data.notes.map((note) => note.id === id ? { ...note, isSolved: !note.isSolved, updatedAt: new Date().toISOString() } : note) });
+
+  const acceptRevisionNote = (id) => {
+    const note = data.notes.find((item) => item.id === id);
+    const essay = data.essays.find((item) => item.id === note?.essayId);
+    if (!note || !essay) return;
+    const target = note.deletedText || note.relatedText;
+    const replacement = note.addedText || "";
+    const result = replaceTextInHtml(essay.content, target, replacement);
+    if (!result.replaced) return alert("没有在正文中找到对应原文，可能正文已经改动。请重新创建批注或手动编辑作文。");
+
+    const now = new Date().toISOString();
+    const revision = {
+      id: uid("revision"),
+      essayId: essay.id,
+      oldContent: essay.content,
+      newContent: result.html,
+      revisionNote: `接受修订：${note.title}`,
+      scoreBefore: essay.currentScore || 0,
+      scoreAfter: essay.currentScore || 0,
+      createdAt: now
+    };
+
+    setData({
+      ...data,
+      essays: data.essays.map((item) => item.id === essay.id ? { ...item, content: result.html, updatedAt: now, revisionCount: (item.revisionCount || 0) + 1 } : item),
+      notes: data.notes.map((item) => item.id === id ? { ...item, revisionStatus: "accepted", isSolved: true, updatedAt: now } : item),
+      revisions: [...data.revisions, revision]
+    });
+  };
+
+  const rejectRevisionNote = (id) => {
+    const now = new Date().toISOString();
+    setData({
+      ...data,
+      notes: data.notes.map((note) => note.id === id ? { ...note, revisionStatus: "rejected", isSolved: true, updatedAt: now } : note)
+    });
+  };
 
   const restoreRevision = (revision) => {
     if (!confirm("确定恢复到这个旧版本吗？当前内容仍会保存在新的修改记录中。")) return;
@@ -1089,7 +1255,7 @@ function App() {
   else if (page === "scores") content = <ScoresPage data={data} openEssay={openEssay} />;
   else if (page === "revisions") content = <RevisionsPage data={data} openEssay={openEssay} />;
   else if (page === "settings") content = <SettingsPage exportData={exportData} importData={importData} resetData={() => { if (confirm("确定重置全部数据吗？")) { localStorage.removeItem(STORAGE_KEY); setData(seedData); } }} />;
-  else if (page === "essay-detail" && selectedEssay) content = <EssayDetail essay={selectedEssay} data={data} onBack={() => setPage("essays")} onEdit={() => editEssay(selectedEssay.id)} onScore={() => setShowScore(true)} onNote={openNoteEditor} toggleNote={toggleNote} restoreRevision={restoreRevision} />;
+  else if (page === "essay-detail" && selectedEssay) content = <EssayDetail essay={selectedEssay} data={data} onBack={() => setPage("essays")} onEdit={() => editEssay(selectedEssay.id)} onScore={() => setShowScore(true)} onNote={openNoteEditor} toggleNote={toggleNote} acceptRevisionNote={acceptRevisionNote} rejectRevisionNote={rejectRevisionNote} restoreRevision={restoreRevision} />;
   else content = <Dashboard data={data} openEssay={openEssay} onNewEssay={startNew} setPage={setPage} />;
 
   return (
