@@ -588,6 +588,7 @@ function EssayEditor({ essay, onSave, onClose }) {
   const [grammarState, setGrammarState] = useState({ loading: false, matches: [], checked: false, error: "" });
   const [trackChanges, setTrackChanges] = useState(false);
   const latestForm = useRef(form);
+  const trackChangesRef = useRef(false);
 
   useEffect(() => {
     latestForm.current = {
@@ -600,6 +601,9 @@ function EssayEditor({ essay, onSave, onClose }) {
       editorRef.current.innerHTML = form.content || "";
     }
   }, []);
+  useEffect(() => {
+    trackChangesRef.current = trackChanges;
+  }, [trackChanges]);
   useEffect(() => {
     const timer = setInterval(() => {
       if (latestForm.current.title || stripHtml(latestForm.current.content).trim()) {
@@ -662,6 +666,25 @@ function EssayEditor({ essay, onSave, onClose }) {
       return true;
     }
 
+    const selection = window.getSelection();
+    if (selection?.modify) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      selection.modify("extend", "backward", "character");
+      if (selection.rangeCount) {
+        const expandedRange = selection.getRangeAt(0);
+        const deleted = expandedRange.toString();
+        if (deleted) {
+          expandedRange.deleteContents();
+          const deletion = makeRevisionSpan("revision-delete inline direct-revision", deleted);
+          expandedRange.insertNode(deletion);
+          moveCaretAfter(deletion);
+          syncEditorContent();
+          return true;
+        }
+      }
+    }
+
     if (range.startContainer.nodeType !== Node.TEXT_NODE || range.startOffset === 0) return false;
     const textNode = range.startContainer;
     const before = textNode.nodeValue.slice(0, range.startOffset - 1);
@@ -701,12 +724,54 @@ function EssayEditor({ essay, onSave, onClose }) {
   };
 
   const handleTrackPaste = (event) => {
-    if (!trackChanges) return;
+    if (!trackChangesRef.current) return;
     const pasted = event.clipboardData?.getData("text/plain");
     if (!pasted) return;
     event.preventDefault();
     insertRevisionAddition(pasted);
   };
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const onBeforeInput = (event) => {
+      if (!trackChangesRef.current) return;
+      const inputType = event.inputType;
+      if (inputType === "insertText" && event.data) {
+        event.preventDefault();
+        insertRevisionAddition(event.data);
+        return;
+      }
+      if (inputType === "insertFromPaste") {
+        const pasted = event.dataTransfer?.getData("text/plain");
+        if (pasted) {
+          event.preventDefault();
+          insertRevisionAddition(pasted);
+        }
+        return;
+      }
+      if (inputType === "deleteContentBackward" || inputType === "deleteContentForward" || inputType === "deleteByCut") {
+        if (markSelectionDeleted()) event.preventDefault();
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (!trackChangesRef.current) return;
+      if (event.key === "Backspace" || event.key === "Delete") {
+        if (markSelectionDeleted()) event.preventDefault();
+      }
+    };
+
+    editor.addEventListener("beforeinput", onBeforeInput);
+    editor.addEventListener("keydown", onKeyDown);
+    editor.addEventListener("paste", handleTrackPaste);
+    return () => {
+      editor.removeEventListener("beforeinput", onBeforeInput);
+      editor.removeEventListener("keydown", onKeyDown);
+      editor.removeEventListener("paste", handleTrackPaste);
+    };
+  }, []);
 
   const resolveDirectRevisions = (mode) => {
     if (!editorRef.current) return;
@@ -806,8 +871,6 @@ function EssayEditor({ essay, onSave, onClose }) {
                 ref={editorRef}
                 contentEditable
                 suppressContentEditableWarning
-                onBeforeInput={handleTrackInput}
-                onPaste={handleTrackPaste}
                 onInput={(e) => {
                   const content = e.currentTarget.innerHTML;
                   latestForm.current = { ...latestForm.current, content };
