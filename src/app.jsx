@@ -256,6 +256,28 @@ function makeRevisionSpan(className, text) {
   return span;
 }
 
+function previousMeaningfulNode(range) {
+  let node = range.startContainer;
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    if (range.startOffset > 0) return node;
+    node = node.previousSibling || node.parentNode?.previousSibling;
+  } else {
+    node = node.childNodes[range.startOffset - 1] || node.previousSibling;
+  }
+
+  while (node && node.nodeType === Node.TEXT_NODE && !node.nodeValue.length) {
+    node = node.previousSibling;
+  }
+  return node;
+}
+
+function isDirectRevision(node, className) {
+  return node?.nodeType === Node.ELEMENT_NODE
+    && node.classList.contains("direct-revision")
+    && node.classList.contains(className);
+}
+
 function buildAnnotatedHtml(html, notes) {
   const container = document.createElement("div");
   container.innerHTML = html || "";
@@ -633,18 +655,31 @@ function EssayEditor({ essay, onSave, onClose }) {
     const context = selectionInside(editorRef.current);
     if (!context || !text) return false;
     const { range } = context;
-    const fragment = document.createDocumentFragment();
 
     if (!range.collapsed) {
       const deleted = range.toString();
       range.deleteContents();
+      const fragment = document.createDocumentFragment();
       fragment.appendChild(makeRevisionSpan("revision-delete inline direct-revision", deleted));
       fragment.appendChild(document.createTextNode(" "));
+      const addition = makeRevisionSpan("revision-add inline direct-revision", text);
+      fragment.appendChild(addition);
+      range.insertNode(fragment);
+      moveCaretAfter(addition);
+      syncEditorContent();
+      return true;
+    }
+
+    const previous = previousMeaningfulNode(range);
+    if (isDirectRevision(previous, "revision-add")) {
+      previous.textContent += text;
+      moveCaretAfter(previous);
+      syncEditorContent();
+      return true;
     }
 
     const addition = makeRevisionSpan("revision-add inline direct-revision", text);
-    fragment.appendChild(addition);
-    range.insertNode(fragment);
+    range.insertNode(addition);
     moveCaretAfter(addition);
     syncEditorContent();
     return true;
@@ -666,23 +701,38 @@ function EssayEditor({ essay, onSave, onClose }) {
       return true;
     }
 
-    const selection = window.getSelection();
-    if (selection?.modify) {
-      selection.removeAllRanges();
-      selection.addRange(range);
-      selection.modify("extend", "backward", "character");
-      if (selection.rangeCount) {
-        const expandedRange = selection.getRangeAt(0);
-        const deleted = expandedRange.toString();
-        if (deleted) {
-          expandedRange.deleteContents();
-          const deletion = makeRevisionSpan("revision-delete inline direct-revision", deleted);
-          expandedRange.insertNode(deletion);
-          moveCaretAfter(deletion);
-          syncEditorContent();
-          return true;
+    const previous = previousMeaningfulNode(range);
+    if (isDirectRevision(previous, "revision-add")) {
+      previous.textContent = previous.textContent.slice(0, -1);
+      if (!previous.textContent) {
+        const anchor = previous.previousSibling || previous.parentNode;
+        previous.remove();
+        if (anchor?.nodeType === Node.TEXT_NODE) {
+          const caret = document.createRange();
+          const selection = window.getSelection();
+          caret.setStart(anchor, anchor.nodeValue.length);
+          caret.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(caret);
         }
+      } else {
+        moveCaretAfter(previous);
       }
+      syncEditorContent();
+      return true;
+    }
+
+    if (isDirectRevision(previous, "revision-delete")) {
+      const beforePrevious = previous.previousSibling;
+      if (beforePrevious?.nodeType === Node.TEXT_NODE && beforePrevious.nodeValue.length) {
+        const deleted = beforePrevious.nodeValue.slice(-1);
+        beforePrevious.nodeValue = beforePrevious.nodeValue.slice(0, -1);
+        previous.textContent = deleted + previous.textContent;
+        moveCaretAfter(previous);
+        syncEditorContent();
+        return true;
+      }
+      return false;
     }
 
     if (range.startContainer.nodeType !== Node.TEXT_NODE || range.startOffset === 0) return false;
