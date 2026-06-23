@@ -651,7 +651,6 @@ function EssaysPage({ data, openEssay, editEssay, onNewEssay, deleteEssay }) {
 function EssayEditor({ essay, onSave, onClose }) {
   const isNew = !essay;
   const editorRef = useRef(null);
-  const modelEssayRef = useRef(null);
   const [form, setForm] = useState({
     title: "", question: "", content: "", topic: "Education", essayType: "Opinion Essay",
     status: "草稿", targetScore: 7, writingDate: new Date().toISOString().slice(0, 10),
@@ -675,9 +674,6 @@ function EssayEditor({ essay, onSave, onClose }) {
     if (editorRef.current) {
       editorRef.current.innerHTML = form.content || "";
     }
-    if (modelEssayRef.current) {
-      modelEssayRef.current.innerHTML = form.modelEssay || "";
-    }
   }, []);
   useEffect(() => {
     trackChangesRef.current = trackChanges;
@@ -699,12 +695,6 @@ function EssayEditor({ essay, onSave, onClose }) {
     const content = editorRef.current?.innerHTML || "";
     latestForm.current = { ...latestForm.current, content };
     setEditorWords(wordCount(content));
-  };
-
-  const modelEssayCommand = (name, value = null) => {
-    modelEssayRef.current?.focus();
-    document.execCommand(name, false, value);
-    setForm({ ...form, modelEssay: modelEssayRef.current?.innerHTML || "" });
   };
 
   const syncEditorContent = () => {
@@ -903,9 +893,8 @@ function EssayEditor({ essay, onSave, onClose }) {
 
   const submit = () => {
     const content = editorRef.current?.innerHTML || form.content;
-    const modelEssay = modelEssayRef.current?.innerHTML || form.modelEssay || "";
     if (!form.title.trim()) return alert("请先填写作文标题。");
-    onSave({ ...form, content, modelEssay });
+    onSave({ ...form, content });
   };
 
   const checkGrammar = async () => {
@@ -1033,36 +1022,6 @@ function EssayEditor({ essay, onSave, onClose }) {
               </div>
             )}
           </div>
-          <div className="grid gap-5 xl:grid-cols-2">
-            <div>
-              <label className="mb-2 block text-xs font-semibold text-emerald-600">高分范文</label>
-              <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-emerald-50/20 focus-within:border-emerald-400">
-                <div className="flex flex-wrap gap-1 border-b border-emerald-100 bg-white/70 p-2">
-                  <button type="button" onClick={() => modelEssayCommand("bold")} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-emerald-50">B</button>
-                  <button type="button" onClick={() => modelEssayCommand("hiliteColor", "#fef08a")} className="rounded-lg bg-yellow-100 px-3 py-1.5 text-xs font-semibold text-yellow-800 hover:bg-yellow-200">高亮好词好句</button>
-                  <button type="button" onClick={() => modelEssayCommand("removeFormat")} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50">清除格式</button>
-                </div>
-                <div
-                  ref={modelEssayRef}
-                  contentEditable
-                  suppressContentEditableWarning
-                  onInput={(e) => setForm({ ...form, modelEssay: e.currentTarget.innerHTML })}
-                  data-placeholder="在这里写入或粘贴高分范文，选中好词好句后点击“高亮好词好句”。"
-                  className="editor-content model-essay editor-placeholder min-h-56 px-4 py-3 text-sm leading-7 outline-none"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="mb-2 block text-xs font-semibold text-orange-600">重点词汇</label>
-              <textarea
-                value={form.keyVocabulary || ""}
-                onChange={(e) => setForm({ ...form, keyVocabulary: e.target.value })}
-                className={`${inputClass} min-h-56 bg-orange-50/40 leading-7`}
-                placeholder={"每行一个：\ndriverless cars | 无人驾驶汽车\nautonomous vehicles | 自动驾驶车辆\nroad safety | 道路安全"}
-              />
-              <p className="mt-2 text-xs leading-5 text-slate-400">支持 “英文 | 中文”、“英文 - 中文” 或 “英文：中文”。</p>
-            </div>
-          </div>
         </div>
         <aside className="space-y-4">
           <div><label className="mb-2 block text-xs font-semibold text-slate-500">主题</label><select value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} className={inputClass}>{TOPICS.map(([v, cn]) => <option key={v} value={v}>{v} · {cn}</option>)}</select></div>
@@ -1120,6 +1079,79 @@ function ScoreEditor({ essay, score, onSave, onClose }) {
   );
 }
 
+function ModelEssayEditor({ essay, onSave, onClose }) {
+  const modelRef = useRef(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (modelRef.current) modelRef.current.innerHTML = essay.modelEssay || "";
+  }, [essay.id]);
+
+  const command = (name, value = null) => {
+    modelRef.current?.focus();
+    document.execCommand(name, false, value);
+  };
+
+  const submit = () => {
+    onSave(essay.id, modelRef.current?.innerHTML || "");
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1200);
+  };
+
+  return (
+    <Modal title={`编辑高分范文 · ${essay.title}`} onClose={onClose} wide>
+      <div className="p-6">
+        <div className="mb-4 rounded-2xl bg-emerald-50 p-4 text-sm leading-6 text-emerald-700">
+          在这里直接编辑范文。选中好词好句后点击“高亮好词好句”，保存后详情页会保留高亮。
+        </div>
+        <div className="overflow-hidden rounded-3xl border border-emerald-100 bg-white focus-within:border-emerald-400">
+          <div className="sticky top-[73px] z-10 flex flex-wrap gap-2 border-b border-emerald-100 bg-white/95 p-3 backdrop-blur">
+            <button type="button" onClick={() => command("bold")} className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-emerald-50">B</button>
+            <button type="button" onClick={() => command("hiliteColor", "#fef08a")} className="rounded-xl bg-yellow-100 px-4 py-2 text-sm font-semibold text-yellow-800 hover:bg-yellow-200">高亮好词好句</button>
+            <button type="button" onClick={() => command("removeFormat")} className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50">清除格式</button>
+          </div>
+          <div
+            ref={modelRef}
+            contentEditable
+            suppressContentEditableWarning
+            data-placeholder="写入或粘贴高分范文..."
+            className="editor-content model-essay editor-placeholder min-h-[560px] px-8 py-7 text-[17px] leading-9 outline-none"
+          />
+        </div>
+      </div>
+      <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-100 bg-white/95 px-6 py-4 backdrop-blur">
+        {saved && <span className="mr-auto text-sm font-semibold text-emerald-600">已保存</span>}
+        <button onClick={onClose} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">关闭</button>
+        <button onClick={submit} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white">保存范文</button>
+      </div>
+    </Modal>
+  );
+}
+
+function VocabularyEditor({ essay, onSave, onClose }) {
+  const [value, setValue] = useState(essay.keyVocabulary || "");
+
+  return (
+    <Modal title={`编辑重点词汇 · ${essay.title}`} onClose={onClose}>
+      <div className="space-y-4 p-6">
+        <div className="rounded-2xl bg-orange-50 p-4 text-sm leading-6 text-orange-700">
+          每行一个词汇或短语，支持 “英文 | 中文”、“英文 - 中文” 或 “英文：中文”。
+        </div>
+        <textarea
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="min-h-[420px] w-full rounded-2xl border border-orange-100 bg-orange-50/30 px-4 py-3 text-sm leading-7 outline-none focus:border-orange-400"
+          placeholder={"driverless cars | 无人驾驶汽车\nautonomous vehicles | 自动驾驶车辆\nroad safety | 道路安全"}
+        />
+      </div>
+      <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-100 bg-white/95 px-6 py-4 backdrop-blur">
+        <button onClick={onClose} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">取消</button>
+        <button onClick={() => onSave(essay.id, value)} className="rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-semibold text-white">保存词汇</button>
+      </div>
+    </Modal>
+  );
+}
+
 function NoteEditor({ essayId, initialRelatedText = "", onSave, onClose }) {
   const [form, setForm] = useState({
     noteType: "词汇问题",
@@ -1167,7 +1199,7 @@ function NoteEditor({ essayId, initialRelatedText = "", onSave, onClose }) {
   );
 }
 
-function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote, acceptRevisionNote, rejectRevisionNote, restoreRevision }) {
+function EssayDetail({ essay, data, onBack, onEdit, onEditModelEssay, onEditVocabulary, onScore, onNote, toggleNote, acceptRevisionNote, rejectRevisionNote, restoreRevision }) {
   const score = [...data.scores].reverse().find((item) => item.essayId === essay.id);
   const notes = data.notes.filter((item) => item.essayId === essay.id);
   const revisions = data.revisions.filter((item) => item.essayId === essay.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -1260,7 +1292,7 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
                 <h2 className="text-2xl font-bold text-emerald-600">高分范文</h2>
                 <p className="mt-1 text-xs text-slate-400">用于和自己的作文结构、词汇和论证展开做对照。</p>
               </div>
-              <button onClick={onEdit} className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">编辑范文</button>
+              <button onClick={onEditModelEssay} className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">编辑范文</button>
             </div>
             {essay.modelEssay?.trim() ? (
               <div className="model-essay editor-content whitespace-pre-wrap rounded-3xl bg-slate-50 p-7 text-[17px] leading-9 text-slate-800" dangerouslySetInnerHTML={{ __html: essay.modelEssay }} />
@@ -1274,7 +1306,7 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
                 <h2 className="text-2xl font-bold text-orange-600">重点词汇</h2>
                 <p className="mt-1 text-xs text-slate-400">按主题积累可以直接复用的表达。</p>
               </div>
-              <button onClick={onEdit} className="rounded-xl bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700">编辑词汇</button>
+              <button onClick={onEditVocabulary} className="rounded-xl bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700">编辑词汇</button>
             </div>
             {vocabulary.length ? (
               <div className="grid gap-4 md:grid-cols-2">
@@ -1453,6 +1485,8 @@ function App() {
   const [showEditor, setShowEditor] = useState(false);
   const [showScore, setShowScore] = useState(false);
   const [showNote, setShowNote] = useState(false);
+  const [showModelEssayEditor, setShowModelEssayEditor] = useState(false);
+  const [showVocabularyEditor, setShowVocabularyEditor] = useState(false);
   const [noteRelatedText, setNoteRelatedText] = useState("");
   const selectedEssay = data.essays.find((essay) => essay.id === selectedEssayId);
 
@@ -1523,6 +1557,24 @@ function App() {
     setData({ ...data, notes: [...data.notes, { ...form, revisionStatus: "", id: uid("note"), createdAt: now, updatedAt: now }] });
     setShowNote(false);
     setNoteRelatedText("");
+  };
+
+  const saveModelEssay = (essayId, modelEssay) => {
+    const now = new Date().toISOString();
+    setData({
+      ...data,
+      essays: data.essays.map((essay) => essay.id === essayId ? { ...essay, modelEssay, updatedAt: now } : essay)
+    });
+    setShowModelEssayEditor(false);
+  };
+
+  const saveVocabulary = (essayId, keyVocabulary) => {
+    const now = new Date().toISOString();
+    setData({
+      ...data,
+      essays: data.essays.map((essay) => essay.id === essayId ? { ...essay, keyVocabulary, updatedAt: now } : essay)
+    });
+    setShowVocabularyEditor(false);
   };
 
   const openNoteEditor = (relatedText = "") => {
@@ -1615,7 +1667,7 @@ function App() {
   else if (page === "scores") content = <ScoresPage data={data} openEssay={openEssay} />;
   else if (page === "revisions") content = <RevisionsPage data={data} openEssay={openEssay} />;
   else if (page === "settings") content = <SettingsPage exportData={exportData} importData={importData} resetData={() => { if (confirm("确定重置全部数据吗？")) { localStorage.removeItem(STORAGE_KEY); setData(seedData); } }} />;
-  else if (page === "essay-detail" && selectedEssay) content = <EssayDetail essay={selectedEssay} data={data} onBack={() => setPage("essays")} onEdit={() => editEssay(selectedEssay.id)} onScore={() => setShowScore(true)} onNote={openNoteEditor} toggleNote={toggleNote} acceptRevisionNote={acceptRevisionNote} rejectRevisionNote={rejectRevisionNote} restoreRevision={restoreRevision} />;
+  else if (page === "essay-detail" && selectedEssay) content = <EssayDetail essay={selectedEssay} data={data} onBack={() => setPage("essays")} onEdit={() => editEssay(selectedEssay.id)} onEditModelEssay={() => setShowModelEssayEditor(true)} onEditVocabulary={() => setShowVocabularyEditor(true)} onScore={() => setShowScore(true)} onNote={openNoteEditor} toggleNote={toggleNote} acceptRevisionNote={acceptRevisionNote} rejectRevisionNote={rejectRevisionNote} restoreRevision={restoreRevision} />;
   else content = <Dashboard data={data} openEssay={openEssay} onNewEssay={startNew} setPage={setPage} />;
 
   return (
@@ -1626,6 +1678,8 @@ function App() {
       {showEditor && <EssayEditor essay={editorEssayId ? data.essays.find((e) => e.id === editorEssayId) : null} onSave={saveEssay} onClose={() => setShowEditor(false)} />}
       {showScore && selectedEssay && <ScoreEditor essay={selectedEssay} score={[...data.scores].reverse().find((s) => s.essayId === selectedEssay.id)} onSave={saveScore} onClose={() => setShowScore(false)} />}
       {showNote && selectedEssay && <NoteEditor essayId={selectedEssay.id} initialRelatedText={noteRelatedText} onSave={saveNote} onClose={() => { setShowNote(false); setNoteRelatedText(""); }} />}
+      {showModelEssayEditor && selectedEssay && <ModelEssayEditor essay={selectedEssay} onSave={saveModelEssay} onClose={() => setShowModelEssayEditor(false)} />}
+      {showVocabularyEditor && selectedEssay && <VocabularyEditor essay={selectedEssay} onSave={saveVocabulary} onClose={() => setShowVocabularyEditor(false)} />}
     </div>
   );
 }
