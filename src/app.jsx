@@ -773,21 +773,26 @@ function EssayEditor({ essay, onSave, onClose }) {
           <div><label className="mb-2 block text-xs font-semibold text-slate-500">作文标题</label><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className={inputClass} placeholder="给这篇作文一个清晰的标题" /></div>
           <div><label className="mb-2 block text-xs font-semibold text-slate-500">IELTS 题目原文</label><textarea value={form.question} onChange={(e) => setForm({ ...form, question: e.target.value })} className={`${inputClass} min-h-24`} placeholder="Paste the original IELTS question here..." /></div>
           <div>
-            <div className="mb-2 flex items-center justify-between"><label className="text-xs font-semibold text-slate-500">作文正文</label><span className="text-xs text-slate-400">{editorWords} words</span></div>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+              <label className="text-xs font-semibold text-slate-500">作文正文</label>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTrackChanges(!trackChanges)}
+                  className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm ${trackChanges ? "bg-rose-600 text-white" : "bg-rose-50 text-rose-700 hover:bg-rose-100"}`}
+                >
+                  {trackChanges ? "修订模式已开启" : "开启修订模式"}
+                </button>
+                <button type="button" onClick={() => resolveDirectRevisions("accept")} className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">接受全部</button>
+                <button type="button" onClick={() => resolveDirectRevisions("reject")} className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100">拒绝全部</button>
+                <span className="text-xs text-slate-400">{editorWords} words</span>
+              </div>
+            </div>
             <div className="overflow-hidden rounded-2xl border border-slate-200 focus-within:border-sage-500">
               <div className="flex flex-wrap gap-1 border-b border-slate-100 bg-slate-50 p-2">
                 {[["bold", "B"], ["italic", "I"], ["formatBlock", "H2", "h2"], ["formatBlock", "P", "p"], ["hiliteColor", "高亮", "#fff0b8"], ["insertUnorderedList", "列表"]].map(([cmd, label, value]) => (
                   <button key={`${cmd}-${label}`} type="button" onClick={() => command(cmd, value)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white">{label}</button>
                 ))}
-                <button
-                  type="button"
-                  onClick={() => setTrackChanges(!trackChanges)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${trackChanges ? "bg-rose-600 text-white" : "bg-white text-slate-600 hover:bg-slate-100"}`}
-                >
-                  {trackChanges ? "修订模式：开" : "修订模式"}
-                </button>
-                <button type="button" onClick={() => resolveDirectRevisions("accept")} className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">接受全部</button>
-                <button type="button" onClick={() => resolveDirectRevisions("reject")} className="rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100">拒绝全部</button>
                 <button type="button" onClick={checkGrammar} disabled={grammarState.loading} className="ml-auto rounded-lg bg-sage-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
                   {grammarState.loading ? "检查中..." : "✓ 语法检查"}
                 </button>
