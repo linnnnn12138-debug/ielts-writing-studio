@@ -651,6 +651,7 @@ function EssaysPage({ data, openEssay, editEssay, onNewEssay, deleteEssay }) {
 function EssayEditor({ essay, onSave, onClose }) {
   const isNew = !essay;
   const editorRef = useRef(null);
+  const modelEssayRef = useRef(null);
   const [form, setForm] = useState({
     title: "", question: "", content: "", topic: "Education", essayType: "Opinion Essay",
     status: "草稿", targetScore: 7, writingDate: new Date().toISOString().slice(0, 10),
@@ -674,6 +675,9 @@ function EssayEditor({ essay, onSave, onClose }) {
     if (editorRef.current) {
       editorRef.current.innerHTML = form.content || "";
     }
+    if (modelEssayRef.current) {
+      modelEssayRef.current.innerHTML = form.modelEssay || "";
+    }
   }, []);
   useEffect(() => {
     trackChangesRef.current = trackChanges;
@@ -695,6 +699,12 @@ function EssayEditor({ essay, onSave, onClose }) {
     const content = editorRef.current?.innerHTML || "";
     latestForm.current = { ...latestForm.current, content };
     setEditorWords(wordCount(content));
+  };
+
+  const modelEssayCommand = (name, value = null) => {
+    modelEssayRef.current?.focus();
+    document.execCommand(name, false, value);
+    setForm({ ...form, modelEssay: modelEssayRef.current?.innerHTML || "" });
   };
 
   const syncEditorContent = () => {
@@ -893,8 +903,9 @@ function EssayEditor({ essay, onSave, onClose }) {
 
   const submit = () => {
     const content = editorRef.current?.innerHTML || form.content;
+    const modelEssay = modelEssayRef.current?.innerHTML || form.modelEssay || "";
     if (!form.title.trim()) return alert("请先填写作文标题。");
-    onSave({ ...form, content });
+    onSave({ ...form, content, modelEssay });
   };
 
   const checkGrammar = async () => {
@@ -1025,12 +1036,21 @@ function EssayEditor({ essay, onSave, onClose }) {
           <div className="grid gap-5 xl:grid-cols-2">
             <div>
               <label className="mb-2 block text-xs font-semibold text-emerald-600">高分范文</label>
-              <textarea
-                value={form.modelEssay || ""}
-                onChange={(e) => setForm({ ...form, modelEssay: e.target.value })}
-                className={`${inputClass} min-h-56 bg-emerald-50/30 leading-7`}
-                placeholder="在这里写入或粘贴高分范文，方便和自己的作文对照复习。"
-              />
+              <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-emerald-50/20 focus-within:border-emerald-400">
+                <div className="flex flex-wrap gap-1 border-b border-emerald-100 bg-white/70 p-2">
+                  <button type="button" onClick={() => modelEssayCommand("bold")} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-emerald-50">B</button>
+                  <button type="button" onClick={() => modelEssayCommand("hiliteColor", "#fef08a")} className="rounded-lg bg-yellow-100 px-3 py-1.5 text-xs font-semibold text-yellow-800 hover:bg-yellow-200">高亮好词好句</button>
+                  <button type="button" onClick={() => modelEssayCommand("removeFormat")} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50">清除格式</button>
+                </div>
+                <div
+                  ref={modelEssayRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  onInput={(e) => setForm({ ...form, modelEssay: e.currentTarget.innerHTML })}
+                  data-placeholder="在这里写入或粘贴高分范文，选中好词好句后点击“高亮好词好句”。"
+                  className="editor-content model-essay editor-placeholder min-h-56 px-4 py-3 text-sm leading-7 outline-none"
+                />
+              </div>
             </div>
             <div>
               <label className="mb-2 block text-xs font-semibold text-orange-600">重点词汇</label>
@@ -1243,7 +1263,7 @@ function EssayDetail({ essay, data, onBack, onEdit, onScore, onNote, toggleNote,
               <button onClick={onEdit} className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">编辑范文</button>
             </div>
             {essay.modelEssay?.trim() ? (
-              <div className="model-essay whitespace-pre-wrap rounded-3xl bg-slate-50 p-7 text-[17px] leading-9 text-slate-800">{essay.modelEssay}</div>
+              <div className="model-essay editor-content whitespace-pre-wrap rounded-3xl bg-slate-50 p-7 text-[17px] leading-9 text-slate-800" dangerouslySetInnerHTML={{ __html: essay.modelEssay }} />
             ) : (
               <div className="rounded-2xl border border-dashed border-emerald-200 bg-emerald-50/40 p-5 text-sm text-emerald-700">还没有高分范文。点击“编辑范文”写入或粘贴一篇范文。</div>
             )}
