@@ -56,8 +56,8 @@ textarea {
 }
 
 .essay-annotation {
-  background: #fef08a;
-  border-bottom: 2px solid #eab308;
+  background: #fff7ed;
+  border-bottom: 2px solid #fb923c;
   border-radius: 0.25rem;
   cursor: pointer;
   padding: 0.08rem 0.12rem;
@@ -65,7 +65,7 @@ textarea {
 }
 
 .essay-annotation:hover {
-  background: #fde047;
+  background: #ffedd5;
 }
 
 .essay-annotation-solved {
@@ -80,6 +80,10 @@ textarea {
   text-decoration-thickness: 2px;
 }
 
+.revision-delete.inline {
+  background: transparent;
+}
+
 .revision-add {
   background: #ecfdf5;
   color: #15803d;
@@ -87,6 +91,16 @@ textarea {
   text-decoration: underline;
   text-decoration-color: #86efac;
   text-decoration-thickness: 2px;
+}
+
+.revision-add.inline {
+  background: transparent;
+  margin-left: 0.2rem;
+}
+
+.model-essay {
+  font-family:
+    Georgia, "Times New Roman", "Songti SC", serif;
 }
 
 .note-focus {
