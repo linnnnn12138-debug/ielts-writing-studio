@@ -231,6 +231,31 @@ function parseVocabulary(text = "") {
     });
 }
 
+function selectionInside(element) {
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!element.contains(range.commonAncestorContainer)) return null;
+  return { selection, range };
+}
+
+function moveCaretAfter(node) {
+  const range = document.createRange();
+  const selection = window.getSelection();
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function makeRevisionSpan(className, text) {
+  const span = document.createElement("span");
+  span.className = className;
+  span.dataset.trackChange = "true";
+  span.textContent = text;
+  return span;
+}
+
 function buildAnnotatedHtml(html, notes) {
   const container = document.createElement("div");
   container.innerHTML = html || "";
@@ -561,6 +586,7 @@ function EssayEditor({ essay, onSave, onClose }) {
   const [saved, setSaved] = useState(false);
   const [editorWords, setEditorWords] = useState(() => wordCount(form.content));
   const [grammarState, setGrammarState] = useState({ loading: false, matches: [], checked: false, error: "" });
+  const [trackChanges, setTrackChanges] = useState(false);
   const latestForm = useRef(form);
 
   useEffect(() => {
@@ -591,6 +617,111 @@ function EssayEditor({ essay, onSave, onClose }) {
     const content = editorRef.current?.innerHTML || "";
     latestForm.current = { ...latestForm.current, content };
     setEditorWords(wordCount(content));
+  };
+
+  const syncEditorContent = () => {
+    const content = editorRef.current?.innerHTML || "";
+    latestForm.current = { ...latestForm.current, content };
+    setEditorWords(wordCount(content));
+  };
+
+  const insertRevisionAddition = (text) => {
+    const context = selectionInside(editorRef.current);
+    if (!context || !text) return false;
+    const { range } = context;
+    const fragment = document.createDocumentFragment();
+
+    if (!range.collapsed) {
+      const deleted = range.toString();
+      range.deleteContents();
+      fragment.appendChild(makeRevisionSpan("revision-delete inline direct-revision", deleted));
+      fragment.appendChild(document.createTextNode(" "));
+    }
+
+    const addition = makeRevisionSpan("revision-add inline direct-revision", text);
+    fragment.appendChild(addition);
+    range.insertNode(fragment);
+    moveCaretAfter(addition);
+    syncEditorContent();
+    return true;
+  };
+
+  const markSelectionDeleted = () => {
+    const context = selectionInside(editorRef.current);
+    if (!context) return false;
+    const { range } = context;
+
+    if (!range.collapsed) {
+      const deleted = range.toString();
+      if (!deleted) return false;
+      range.deleteContents();
+      const deletion = makeRevisionSpan("revision-delete inline direct-revision", deleted);
+      range.insertNode(deletion);
+      moveCaretAfter(deletion);
+      syncEditorContent();
+      return true;
+    }
+
+    if (range.startContainer.nodeType !== Node.TEXT_NODE || range.startOffset === 0) return false;
+    const textNode = range.startContainer;
+    const before = textNode.nodeValue.slice(0, range.startOffset - 1);
+    const deleted = textNode.nodeValue.slice(range.startOffset - 1, range.startOffset);
+    const after = textNode.nodeValue.slice(range.startOffset);
+    const deletion = makeRevisionSpan("revision-delete inline direct-revision", deleted);
+    const afterNode = document.createTextNode(after);
+    textNode.nodeValue = before;
+    textNode.parentNode.insertBefore(deletion, textNode.nextSibling);
+    textNode.parentNode.insertBefore(afterNode, deletion.nextSibling);
+    moveCaretAfter(deletion);
+    syncEditorContent();
+    return true;
+  };
+
+  const handleTrackInput = (event) => {
+    if (!trackChanges) return;
+    const inputType = event.inputType || event.nativeEvent?.inputType;
+    const data = event.data || event.nativeEvent?.data;
+    if (inputType === "insertText" && data) {
+      event.preventDefault();
+      insertRevisionAddition(data);
+      return;
+    }
+    if (inputType === "insertFromPaste") {
+      const pasted = event.clipboardData?.getData("text/plain") || event.nativeEvent?.dataTransfer?.getData("text/plain");
+      if (pasted) {
+        event.preventDefault();
+        insertRevisionAddition(pasted);
+      }
+      return;
+    }
+    if (inputType === "deleteContentBackward" || inputType === "deleteContentForward" || inputType === "deleteByCut") {
+      event.preventDefault();
+      markSelectionDeleted();
+    }
+  };
+
+  const handleTrackPaste = (event) => {
+    if (!trackChanges) return;
+    const pasted = event.clipboardData?.getData("text/plain");
+    if (!pasted) return;
+    event.preventDefault();
+    insertRevisionAddition(pasted);
+  };
+
+  const resolveDirectRevisions = (mode) => {
+    if (!editorRef.current) return;
+    const changes = Array.from(editorRef.current.querySelectorAll(".direct-revision"));
+    changes.forEach((node) => {
+      if (node.classList.contains("revision-delete")) {
+        if (mode === "accept") node.remove();
+        else node.replaceWith(document.createTextNode(node.textContent));
+      } else if (node.classList.contains("revision-add")) {
+        if (mode === "accept") node.replaceWith(document.createTextNode(node.textContent));
+        else node.remove();
+      }
+    });
+    editorRef.current.normalize();
+    syncEditorContent();
   };
 
   const submit = () => {
@@ -648,14 +779,30 @@ function EssayEditor({ essay, onSave, onClose }) {
                 {[["bold", "B"], ["italic", "I"], ["formatBlock", "H2", "h2"], ["formatBlock", "P", "p"], ["hiliteColor", "高亮", "#fff0b8"], ["insertUnorderedList", "列表"]].map(([cmd, label, value]) => (
                   <button key={`${cmd}-${label}`} type="button" onClick={() => command(cmd, value)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white">{label}</button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setTrackChanges(!trackChanges)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${trackChanges ? "bg-rose-600 text-white" : "bg-white text-slate-600 hover:bg-slate-100"}`}
+                >
+                  {trackChanges ? "修订模式：开" : "修订模式"}
+                </button>
+                <button type="button" onClick={() => resolveDirectRevisions("accept")} className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">接受全部</button>
+                <button type="button" onClick={() => resolveDirectRevisions("reject")} className="rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100">拒绝全部</button>
                 <button type="button" onClick={checkGrammar} disabled={grammarState.loading} className="ml-auto rounded-lg bg-sage-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
                   {grammarState.loading ? "检查中..." : "✓ 语法检查"}
                 </button>
               </div>
+              {trackChanges && (
+                <div className="border-b border-rose-100 bg-rose-50 px-4 py-2 text-xs leading-5 text-rose-700">
+                  修订模式已开启：Backspace 会留下红色删除线，新输入或粘贴内容会显示为绿色。
+                </div>
+              )}
               <div
                 ref={editorRef}
                 contentEditable
                 suppressContentEditableWarning
+                onBeforeInput={handleTrackInput}
+                onPaste={handleTrackPaste}
                 onInput={(e) => {
                   const content = e.currentTarget.innerHTML;
                   latestForm.current = { ...latestForm.current, content };
