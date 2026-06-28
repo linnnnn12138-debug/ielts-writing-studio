@@ -43,10 +43,19 @@ textarea {
   font-size: 1.35rem;
   font-weight: 700;
   margin: 1rem 0 0.5rem;
+  text-align: justify;
+  text-justify: inter-word;
 }
 
 .editor-content p {
   margin: 0 0 0.85rem;
+  text-align: justify;
+  text-justify: inter-word;
+}
+
+.editor-content {
+  text-align: justify;
+  text-justify: inter-word;
 }
 
 .editor-content mark {
