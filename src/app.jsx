@@ -894,7 +894,7 @@ function EssayEditor({ essay, onSave, onClose }) {
   const submit = () => {
     const content = editorRef.current?.innerHTML || form.content;
     if (!form.title.trim()) return alert("请先填写作文标题。");
-    onSave({ ...form, content });
+    onSave({ ...form, content, hasTrackChanges: content.includes("direct-revision") });
   };
 
   const checkGrammar = async () => {
@@ -1500,29 +1500,33 @@ function App() {
 
   const saveEssay = (form) => {
     const now = new Date().toISOString();
+    const { hasTrackChanges, ...essayForm } = form;
     if (editorEssayId) {
       const old = data.essays.find((e) => e.id === editorEssayId);
-      const changed = old.content !== form.content || old.title !== form.title || old.question !== form.question;
-      const syncedNotes = extractDirectRevisionNotes(form.content, old.id, now);
+      const changed = old.content !== essayForm.content || old.title !== essayForm.title || old.question !== essayForm.question;
+      const syncedNotes = hasTrackChanges ? extractDirectRevisionNotes(essayForm.content, old.id, now) : [];
+      const nextOriginalContent = hasTrackChanges ? (old.originalContent || old.content) : essayForm.content;
       const revision = changed ? {
-        id: uid("revision"), essayId: old.id, oldContent: old.content, newContent: form.content,
+        id: uid("revision"), essayId: old.id, oldContent: old.content, newContent: essayForm.content,
         revisionNote: "编辑并保存作文", scoreBefore: old.currentScore || 0, scoreAfter: old.currentScore || 0, createdAt: now
       } : null;
       setData({
         ...data,
-        essays: data.essays.map((e) => e.id === editorEssayId ? { ...e, ...form, originalContent: e.originalContent || old.content, updatedAt: now, revisionCount: (e.revisionCount || 0) + (changed ? 1 : 0) } : e),
-        notes: [
-          ...data.notes.filter((note) => note.essayId !== old.id || !isAutoDirectRevisionNote(note)),
-          ...syncedNotes
-        ],
+        essays: data.essays.map((e) => e.id === editorEssayId ? { ...e, ...essayForm, originalContent: nextOriginalContent, updatedAt: now, revisionCount: (e.revisionCount || 0) + (changed ? 1 : 0) } : e),
+        notes: hasTrackChanges
+          ? [
+              ...data.notes.filter((note) => note.essayId !== old.id || !isAutoDirectRevisionNote(note)),
+              ...syncedNotes
+            ]
+          : data.notes.filter((note) => note.essayId !== old.id || !isAutoDirectRevisionNote(note)),
         revisions: revision ? [...data.revisions, revision] : data.revisions
       });
       setSelectedEssayId(editorEssayId);
       setPage("essay-detail");
     } else {
       const essayId = uid("essay");
-      const syncedNotes = extractDirectRevisionNotes(form.content, essayId, now);
-      const essay = { ...form, id: essayId, originalContent: form.content, currentScore: 0, createdAt: now, updatedAt: now, revisionCount: 0 };
+      const syncedNotes = hasTrackChanges ? extractDirectRevisionNotes(essayForm.content, essayId, now) : [];
+      const essay = { ...essayForm, id: essayId, originalContent: essayForm.content, currentScore: 0, createdAt: now, updatedAt: now, revisionCount: 0 };
       setData({ ...data, essays: [essay, ...data.essays], notes: syncedNotes.length ? [...data.notes, ...syncedNotes] : data.notes });
       setSelectedEssayId(essay.id);
       setPage("essay-detail");
