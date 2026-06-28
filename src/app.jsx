@@ -40,6 +40,7 @@ const NAV_ITEMS = [
 ];
 
 const STORAGE_KEY = "ielts-writing-studio-v1";
+const BACKUP_STORAGE_KEY = "ielts-writing-studio-v1-backup";
 
 const seedData = {
   essays: [
@@ -147,9 +148,16 @@ const seedData = {
 function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? { ...seedData, ...JSON.parse(raw) } : seedData;
+    if (raw) return { ...seedData, ...JSON.parse(raw) };
+    const backup = localStorage.getItem(BACKUP_STORAGE_KEY);
+    return backup ? { ...seedData, ...JSON.parse(backup) } : seedData;
   } catch {
-    return seedData;
+    try {
+      const backup = localStorage.getItem(BACKUP_STORAGE_KEY);
+      return backup ? { ...seedData, ...JSON.parse(backup) } : seedData;
+    } catch {
+      return seedData;
+    }
   }
 }
 
@@ -1230,18 +1238,18 @@ function EssayDetail({ essay, data, onBack, onEdit, onEditModelEssay, onEditVoca
   return (
     <>
       <button onClick={onBack} className="mb-6 text-sm font-semibold text-slate-500 hover:text-ink">← 返回作文库</button>
-      <div className="mb-7 flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-        <div>
+      <div className="mb-7 grid gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+        <div className="min-w-0">
           <div className="mb-3 flex flex-wrap items-center gap-2"><StatusBadge status={essay.status} /><span className="text-xs text-slate-400">{essay.topic}</span><span className="text-xs text-slate-300">·</span><span className="text-xs text-slate-400">{essay.essayType}</span></div>
           <h1 className="max-w-4xl text-3xl font-bold tracking-tight">{essay.title}</h1>
           <p className="mt-2 text-sm text-slate-400">写于 {formatDate(essay.writingDate)} · {wordCount(essay.content)} words · 修改 {essay.revisionCount || 0} 次</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={addNoteFromSelection} className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${selectedText ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white"}`}>
+        <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
+          <button onClick={addNoteFromSelection} className={`min-w-fit whitespace-nowrap rounded-xl border px-4 py-2.5 text-sm font-semibold ${selectedText ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white"}`}>
             ＋ {selectedText ? `批注已选文字（${selectedText.length}）` : "批注选中文本"}
           </button>
-          <button onClick={onScore} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold">◎ 评分</button>
-          <button onClick={onEdit} className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-white">编辑作文</button>
+          <button onClick={onScore} className="min-w-fit whitespace-nowrap rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold">◎ 评分</button>
+          <button onClick={onEdit} className="min-w-fit whitespace-nowrap rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-white">编辑作文</button>
         </div>
       </div>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -1464,13 +1472,25 @@ function RevisionsPage({ data, openEssay }) {
   );
 }
 
-function SettingsPage({ resetData, exportData, importData }) {
+function SettingsPage({ resetData, exportData, importData, restoreBackup }) {
   const fileRef = useRef(null);
+  const hasBackup = (() => {
+    try { return Boolean(localStorage.getItem(BACKUP_STORAGE_KEY)); } catch { return false; }
+  })();
   return (
     <>
       <PageHeader eyebrow="Preferences" title="设置" description="管理本地数据和学习工作区。" />
       <div className="max-w-2xl space-y-5">
-        <section className="rounded-3xl border border-slate-100 bg-white p-6 shadow-soft"><h2 className="font-bold">数据备份</h2><p className="mt-2 text-sm leading-6 text-slate-500">所有数据保存在当前浏览器的 localStorage。建议定期导出 JSON 备份。</p><div className="mt-5 flex flex-wrap gap-3"><button onClick={exportData} className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-white">导出数据</button><button onClick={() => fileRef.current.click()} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold">导入数据</button><input ref={fileRef} type="file" accept=".json" className="hidden" onChange={(e) => importData(e.target.files[0])} /></div></section>
+        <section className="rounded-3xl border border-slate-100 bg-white p-6 shadow-soft">
+          <h2 className="font-bold">数据备份</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">作文数据保存在当前浏览器。系统更新不会主动删除数据，但换浏览器、清缓存或隐私模式会导致看不到原数据。现在会自动保存一份本地备份镜像。</p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button onClick={exportData} className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-white">导出数据</button>
+            <button onClick={() => fileRef.current.click()} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold">导入数据</button>
+            <button onClick={restoreBackup} disabled={!hasBackup} className="rounded-xl border border-sage-200 px-4 py-2.5 text-sm font-semibold text-sage-700 disabled:cursor-not-allowed disabled:opacity-40">恢复本地备份</button>
+            <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={(e) => importData(e.target.files[0])} />
+          </div>
+        </section>
         <section className="rounded-3xl border border-rose-100 bg-white p-6 shadow-soft"><h2 className="font-bold text-rose-600">重置工作区</h2><p className="mt-2 text-sm leading-6 text-slate-500">删除当前浏览器中的全部作文、评分、笔记和修改历史，并恢复示例数据。</p><button onClick={resetData} className="mt-5 rounded-xl bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-600">重置全部数据</button></section>
       </div>
     </>
@@ -1489,9 +1509,16 @@ function App() {
   const [showVocabularyEditor, setShowVocabularyEditor] = useState(false);
   const [noteRelatedText, setNoteRelatedText] = useState("");
   const selectedEssay = data.essays.find((essay) => essay.id === selectedEssayId);
+  const preserveBackupOnceRef = useRef(false);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    const serialized = JSON.stringify(data);
+    localStorage.setItem(STORAGE_KEY, serialized);
+    if (preserveBackupOnceRef.current) {
+      preserveBackupOnceRef.current = false;
+    } else {
+      localStorage.setItem(BACKUP_STORAGE_KEY, serialized);
+    }
   }, [data]);
 
   const openEssay = (id) => { setSelectedEssayId(id); setPage("essay-detail"); window.scrollTo(0, 0); };
@@ -1657,6 +1684,19 @@ function App() {
     reader.readAsText(file);
   };
 
+  const restoreBackup = () => {
+    try {
+      const raw = localStorage.getItem(BACKUP_STORAGE_KEY);
+      if (!raw) return alert("没有找到本地备份。");
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed.essays)) throw new Error();
+      setData({ essays: parsed.essays || [], scores: parsed.scores || [], notes: parsed.notes || [], revisions: parsed.revisions || [] });
+      alert("已从本地备份恢复。");
+    } catch {
+      alert("本地备份无法读取。");
+    }
+  };
+
   const selectCategory = (value) => {
     setPage("essays");
     setTimeout(() => alert(`已进入作文库。你可以使用筛选器查看 ${value} 分类。`), 50);
@@ -1670,7 +1710,7 @@ function App() {
   else if (page === "notes") content = <NotesPage data={data} toggleNote={toggleNote} openEssay={openEssay} />;
   else if (page === "scores") content = <ScoresPage data={data} openEssay={openEssay} />;
   else if (page === "revisions") content = <RevisionsPage data={data} openEssay={openEssay} />;
-  else if (page === "settings") content = <SettingsPage exportData={exportData} importData={importData} resetData={() => { if (confirm("确定重置全部数据吗？")) { localStorage.removeItem(STORAGE_KEY); setData(seedData); } }} />;
+  else if (page === "settings") content = <SettingsPage exportData={exportData} importData={importData} restoreBackup={restoreBackup} resetData={() => { if (confirm("确定重置全部数据吗？当前数据会先保留到本地备份。")) { localStorage.setItem(BACKUP_STORAGE_KEY, JSON.stringify(data)); preserveBackupOnceRef.current = true; localStorage.removeItem(STORAGE_KEY); setData(seedData); } }} />;
   else if (page === "essay-detail" && selectedEssay) content = <EssayDetail essay={selectedEssay} data={data} onBack={() => setPage("essays")} onEdit={() => editEssay(selectedEssay.id)} onEditModelEssay={() => setShowModelEssayEditor(true)} onEditVocabulary={() => setShowVocabularyEditor(true)} onScore={() => setShowScore(true)} onNote={openNoteEditor} toggleNote={toggleNote} acceptRevisionNote={acceptRevisionNote} rejectRevisionNote={rejectRevisionNote} restoreRevision={restoreRevision} />;
   else content = <Dashboard data={data} openEssay={openEssay} onNewEssay={startNew} setPage={setPage} />;
 
