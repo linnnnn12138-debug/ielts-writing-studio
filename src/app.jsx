@@ -316,6 +316,69 @@ function makeRevisionSpan(className, text) {
   return span;
 }
 
+function sampleEditorFormat(root) {
+  const context = selectionInside(root);
+  if (!context || context.range.collapsed) return null;
+
+  let element = context.range.startContainer.nodeType === Node.ELEMENT_NODE
+    ? context.range.startContainer
+    : context.range.startContainer.parentElement;
+
+  while (element && element !== root && !element.matches("b,strong,i,em,mark,span,[style]")) {
+    element = element.parentElement;
+  }
+  if (!element || element === root) element = context.range.startContainer.parentElement;
+  if (!element || element === root) return null;
+  if (element.closest(".direct-revision,.revision-add,.revision-delete")) return { blocked: true };
+
+  const boldNode = element.closest("b,strong");
+  const italicNode = element.closest("i,em");
+  const markNode = element.closest("mark");
+  const styledNode = element.closest("span[style],mark,[style]");
+  const computed = window.getComputedStyle(styledNode || element);
+  const background = computed.backgroundColor && computed.backgroundColor !== "rgba(0, 0, 0, 0)" && computed.backgroundColor !== "transparent"
+    ? computed.backgroundColor
+    : "";
+  const color = computed.color && computed.color !== "rgb(29, 41, 57)" ? computed.color : "";
+
+  return {
+    bold: !!boldNode || Number.parseInt(computed.fontWeight, 10) >= 600,
+    italic: !!italicNode || computed.fontStyle === "italic",
+    background,
+    color,
+    className: (styledNode?.className || "")
+      .split(/\s+/)
+      .filter((name) => name && !["direct-revision", "revision-add", "revision-delete", "inline", "essay-annotation"].includes(name))
+      .join(" "),
+    style: styledNode?.getAttribute("style") || "",
+    useMark: !!markNode
+  };
+}
+
+function applyEditorFormat(root, format) {
+  const context = selectionInside(root);
+  if (!context || context.range.collapsed || !format) return false;
+  const { range, selection } = context;
+  const wrapper = document.createElement(format.useMark ? "mark" : "span");
+  if (format.className) wrapper.className = format.className;
+  if (format.style) wrapper.setAttribute("style", format.style);
+  if (format.bold) wrapper.style.fontWeight = "700";
+  if (format.italic) wrapper.style.fontStyle = "italic";
+  if (format.background && !wrapper.style.backgroundColor) wrapper.style.backgroundColor = format.background;
+  if (format.color && !wrapper.style.color) wrapper.style.color = format.color;
+
+  const fragment = range.extractContents();
+  wrapper.appendChild(fragment);
+  range.insertNode(wrapper);
+  root.normalize();
+  selection.removeAllRanges();
+  const nextRange = document.createRange();
+  nextRange.selectNodeContents(wrapper);
+  nextRange.collapse(false);
+  selection.addRange(nextRange);
+  return true;
+}
+
 function previousMeaningfulNode(range) {
   let node = range.startContainer;
 
@@ -669,6 +732,7 @@ function EssayEditor({ essay, onSave, onClose }) {
   const [editorWords, setEditorWords] = useState(() => wordCount(form.content));
   const [grammarState, setGrammarState] = useState({ loading: false, matches: [], checked: false, error: "" });
   const [trackChanges, setTrackChanges] = useState(false);
+  const [formatBrush, setFormatBrush] = useState(null);
   const latestForm = useRef(form);
   const trackChangesRef = useRef(false);
 
@@ -709,6 +773,19 @@ function EssayEditor({ essay, onSave, onClose }) {
     const content = editorRef.current?.innerHTML || "";
     latestForm.current = { ...latestForm.current, content };
     setEditorWords(wordCount(content));
+  };
+
+  const pickFormat = () => {
+    const format = sampleEditorFormat(editorRef.current);
+    if (format?.blocked) return alert("修订里的红色删除线和绿色新增不是普通格式，格式刷不会复制这些修订痕迹。");
+    if (!format) return alert("请先选中一段已经有格式的文字。");
+    setFormatBrush(format);
+  };
+
+  const applyFormat = () => {
+    if (!formatBrush) return alert("请先选中一段文字并点击“取样格式”。");
+    if (!applyEditorFormat(editorRef.current, formatBrush)) return alert("请选中要应用格式的文字。");
+    syncEditorContent();
   };
 
   const insertRevisionAddition = (text) => {
@@ -968,6 +1045,8 @@ function EssayEditor({ essay, onSave, onClose }) {
                 {[["bold", "B"], ["italic", "I"], ["formatBlock", "H2", "h2"], ["formatBlock", "P", "p"], ["hiliteColor", "高亮", "#fff0b8"], ["insertUnorderedList", "列表"]].map(([cmd, label, value]) => (
                   <button key={`${cmd}-${label}`} type="button" onClick={() => command(cmd, value)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white">{label}</button>
                 ))}
+                <button type="button" onClick={pickFormat} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${formatBrush ? "bg-sage-50 text-sage-700" : "text-slate-600 hover:bg-white"}`}>取样格式</button>
+                <button type="button" onClick={applyFormat} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white">应用格式</button>
                 <button type="button" onClick={checkGrammar} disabled={grammarState.loading} className="ml-auto rounded-lg bg-sage-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
                   {grammarState.loading ? "检查中..." : "✓ 语法检查"}
                 </button>
@@ -1090,6 +1169,7 @@ function ScoreEditor({ essay, score, onSave, onClose }) {
 function ModelEssayEditor({ essay, onSave, onClose }) {
   const modelRef = useRef(null);
   const [saved, setSaved] = useState(false);
+  const [formatBrush, setFormatBrush] = useState(null);
 
   useEffect(() => {
     if (modelRef.current) modelRef.current.innerHTML = essay.modelEssay || "";
@@ -1098,6 +1178,18 @@ function ModelEssayEditor({ essay, onSave, onClose }) {
   const command = (name, value = null) => {
     modelRef.current?.focus();
     document.execCommand(name, false, value);
+  };
+
+  const pickFormat = () => {
+    const format = sampleEditorFormat(modelRef.current);
+    if (format?.blocked) return alert("修订里的红色删除线和绿色新增不是普通格式，格式刷不会复制这些修订痕迹。");
+    if (!format) return alert("请先选中一段已经有格式的文字。");
+    setFormatBrush(format);
+  };
+
+  const applyFormat = () => {
+    if (!formatBrush) return alert("请先选中一段文字并点击“取样格式”。");
+    if (!applyEditorFormat(modelRef.current, formatBrush)) return alert("请选中要应用格式的文字。");
   };
 
   const submit = () => {
@@ -1116,6 +1208,8 @@ function ModelEssayEditor({ essay, onSave, onClose }) {
           <div className="sticky top-[73px] z-10 flex flex-wrap gap-2 border-b border-emerald-100 bg-white/95 p-3 backdrop-blur">
             <button type="button" onClick={() => command("bold")} className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-emerald-50">B</button>
             <button type="button" onClick={() => command("hiliteColor", "#fef08a")} className="rounded-xl bg-yellow-100 px-4 py-2 text-sm font-semibold text-yellow-800 hover:bg-yellow-200">高亮好词好句</button>
+            <button type="button" onClick={pickFormat} className={`rounded-xl px-4 py-2 text-sm font-semibold ${formatBrush ? "bg-emerald-50 text-emerald-700" : "text-slate-600 hover:bg-emerald-50"}`}>取样格式</button>
+            <button type="button" onClick={applyFormat} className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-emerald-50">应用格式</button>
             <button type="button" onClick={() => command("removeFormat")} className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50">清除格式</button>
           </div>
           <div
