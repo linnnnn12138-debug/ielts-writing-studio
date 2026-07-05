@@ -516,15 +516,16 @@ function Modal({ title, children, onClose, wide = false }) {
   );
 }
 
-function Sidebar({ page, setPage, onNewEssay }) {
+function Sidebar({ page, setPage, onNewEssay, isOpen, onToggle }) {
   return (
-    <aside className="desktop-sidebar fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-slate-200/80 bg-white px-4 py-6">
+    <aside className={`desktop-sidebar fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-200/80 bg-white px-4 py-6 shadow-soft transition-transform duration-300 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
       <div className="mb-8 flex items-center gap-3 px-3">
         <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-ink text-lg font-black text-white">I</div>
-        <div>
+        <div className="min-w-0 flex-1">
           <div className="font-bold tracking-tight">IELTS Studio</div>
           <div className="text-xs text-slate-400">Writing workspace</div>
         </div>
+        <button onClick={onToggle} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-ink" title="收起侧栏">‹</button>
       </div>
       <button onClick={onNewEssay} className="mb-6 flex items-center justify-center gap-2 rounded-2xl bg-ink px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700">
         <span className="text-lg">＋</span> 新建作文
@@ -546,10 +547,11 @@ function Sidebar({ page, setPage, onNewEssay }) {
   );
 }
 
-function MobileNav({ page, setPage, onNewEssay }) {
+function MobileNav({ page, setPage, onNewEssay, onToggleSidebar }) {
   return (
-    <div className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
-      <button onClick={() => setPage("dashboard")} className="font-bold">IELTS Studio</button>
+    <div className="mobile-nav sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
+      <button onClick={onToggleSidebar} className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-lg font-bold text-ink" title="展开侧栏">☰</button>
+      <button onClick={() => setPage("dashboard")} className="whitespace-nowrap font-bold">IELTS Studio</button>
       <select value={page} onChange={(e) => setPage(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
         {NAV_ITEMS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
       </select>
@@ -1602,6 +1604,7 @@ function App() {
   const [showModelEssayEditor, setShowModelEssayEditor] = useState(false);
   const [showVocabularyEditor, setShowVocabularyEditor] = useState(false);
   const [noteRelatedText, setNoteRelatedText] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 1500);
   const selectedEssay = data.essays.find((essay) => essay.id === selectedEssayId);
   const preserveBackupOnceRef = useRef(false);
 
@@ -1614,6 +1617,14 @@ function App() {
       localStorage.setItem(BACKUP_STORAGE_KEY, serialized);
     }
   }, [data]);
+
+  useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth > 1500) setSidebarOpen(true);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const openEssay = (id) => { setSelectedEssayId(id); setPage("essay-detail"); window.scrollTo(0, 0); };
   const startNew = () => { setEditorEssayId(undefined); setShowEditor(true); };
@@ -1810,9 +1821,17 @@ function App() {
 
   return (
     <div className="min-h-screen bg-mist">
-      <Sidebar page={page} setPage={setPage} onNewEssay={startNew} />
-      <MobileNav page={page === "essay-detail" ? "essays" : page} setPage={setPage} onNewEssay={startNew} />
-      <main className="px-4 py-8 lg:ml-64 lg:px-10 xl:px-14 xl:py-10"><div className="mx-auto max-w-7xl">{content}</div></main>
+      <Sidebar page={page} setPage={setPage} onNewEssay={startNew} isOpen={sidebarOpen} onToggle={() => setSidebarOpen(false)} />
+      <MobileNav page={page === "essay-detail" ? "essays" : page} setPage={setPage} onNewEssay={startNew} onToggleSidebar={() => setSidebarOpen(true)} />
+      {!sidebarOpen && (
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="sidebar-open-button fixed left-4 top-20 z-30 rounded-2xl bg-ink px-4 py-3 text-sm font-bold text-white shadow-soft"
+        >
+          ☰ 导航
+        </button>
+      )}
+      <main className={`app-main px-4 py-8 transition-[margin] duration-300 lg:px-10 xl:px-14 xl:py-10 ${sidebarOpen ? "lg:ml-64" : ""}`}><div className="mx-auto max-w-7xl">{content}</div></main>
       {showEditor && <EssayEditor essay={editorEssayId ? data.essays.find((e) => e.id === editorEssayId) : null} onSave={saveEssay} onClose={() => setShowEditor(false)} />}
       {showScore && selectedEssay && <ScoreEditor essay={selectedEssay} score={[...data.scores].reverse().find((s) => s.essayId === selectedEssay.id)} onSave={saveScore} onClose={() => setShowScore(false)} />}
       {showNote && selectedEssay && <NoteEditor essayId={selectedEssay.id} initialRelatedText={noteRelatedText} onSave={saveNote} onClose={() => { setShowNote(false); setNoteRelatedText(""); }} />}
