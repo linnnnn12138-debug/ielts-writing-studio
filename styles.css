@@ -124,23 +124,12 @@ textarea {
   scrollbar-width: thin;
 }
 
-@media (max-width: 900px) {
-  .desktop-sidebar {
-    display: none !important;
-  }
-}
-
 @media (max-width: 1500px) {
-  .desktop-sidebar {
-    display: none !important;
-  }
-
   .mobile-nav {
     display: flex !important;
   }
 
   .app-main {
-    margin-left: 0 !important;
     padding-left: 1rem !important;
     padding-right: 1rem !important;
   }
